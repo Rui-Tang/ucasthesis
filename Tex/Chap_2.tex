@@ -6,11 +6,24 @@ Spark是一种基于内存的分布式计算框架。Spark框架分为四层：�
     \item 用户层：用户层提供了丰富的应用接口。包括面向结构化数据的查询接口Spark SQL，面向图计算的GraphX、面向机器学习的Spark MLlib，面向实时流计算的Spark Stream。用户使用提供的接口可以实现丰富的应用程序。
     \item 作业管理执行层：框架收到用户提交的应用程序后，就将其解析成Spark可以识别的逻辑执行计划。比如对于Spark SQL作业，会通过SQL语言的解释器将SQL语句解释为Spark可识别的作业执行计划，一般是以DAG（Directed Acycilc Graph）有向无环图结构组成的作业执行计划。Spark框架会遍历DAG，如果遇到需要Shuffle的边就会对当前边进行切割。遍历完毕之后整个DAG被切割成多个子图，每个子图都会更具拓扑顺序从前到后逐渐调度执行。
     \item 资源任务调度层：Spark框架一般是主从（Master-Slave）架构。主节点负责接受用户的应用，解析作业，管理执行作业，并在出错场景下做容错管理。从节点主要负责接受主节点的任务执行计划，具体执行作业并将结果汇总给主节点。
-    \item 物理执行层：
+    \item 物理执行层：物理执行层会执行真正的任务。物理执行层下载或者接受得到用户代码，申请内存开始执行，将执行结果存入特定文件或者通过网络发送给下游节点。任务执行过程中需要内存，输出临时数据也需要在内存中缓存。执行结束之后框架会将执行结果发送给框架。
 \end{enumerate}
 
 \section{Spark系统整体架构}
-\section{分布式内存计算核心模块分析}
+Spark框架系统架构采用了Master-Worker结构。Master节点负责管调度理应用，Worker负责具体执行任务。Master节点会管理监控所有的Worker节点，并且调度执行应用作业，将任务调度给Worker节点，监控收集Worker节点上任务的执行状况。Worker节点会定时和Master节点进行心跳交互。收到Master节点发送的任务后后在本地执行任务，并监控任务状态，将任务执行状况上报给Master节点。具体有一下几个概念需要解释。
+
+Spark Application，Spark应用指的是一个可运行的Spark程序。程序中包含main函数，一般流程是从数据源读取输入数据，进行一系列的处理，计算的到结果后保存到磁盘中。应用程序包含了一些配置参数，例如需要使用的CPU个数，Executor内存大小等。用户可以直接使用Spark提供的接口实现程序，也可以使用Spark SQL编写程序，Spark SQL框架会将SQL查询语言转化成一个Spark应用。
+
+Spark Driver，Spark驱动程序是指运行Spark应用main函数的进程，它会创建Spark Context。一般是指Master节点运行的Spark应用进程，Driver进程独立于Master进程。Driver进程会通过DAGScheduler、TaskScheduler、SchedulerBackEnd等模块调度调度应用中的具体任务。
+
+Executor，Spark执行器是Spark集群的一个资源单位。Spark Driver会向Yarn、K8s等资源调度器申请资源，资源分配成功之后会启动一个Executor进程。之后Spark Driver通过DAGScheduler和TaskScheduler调度执行作业，并通过SchedulerBackend将具体任务发送给Executor。Executor收到任务请求后会在本地JVM虚拟机创建进程执行任务。
+
+Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个计算任务，然后调度给Executor执行。Task是最小的计算任务，Executor会给每个Task分配一个JVM进程，执行具体的计算任务，如Map算子、Filter算子、Reduce算子等。Executor一般会占用多个CPU，Task一般使用一个CPU，所以Executor中可以执行多个Task，所有Task共享Executor的内存。
+
+这几个概念中Driver需要进一步解释。Driver包含SparkContext对象，SparkContext会将应用程序转化成一个DAG图，之后遍历DAG图，如果遇到一个action操作，也就是需要具体计算结果的操作，SparkContext就会给DAGScheduler提交一个Job。DAGScheduler收到Job请求之后会从后向前遍历作业，如果遇到边是窄依赖，就会将当前节点加入当前Stage，如果遇到的边是宽依赖，也就是需要Shuffle的边，DAGScheduler就会创建一个新的Stage，并将该节点加入新的Stage之中。遍历结束之后会得到许多个Stage，DAGScheduler会将Stage打包成TaskSet后发送给TaskScheduler执行。TaskScheduler后根据调度策略选择合适的Executor调度执行计算任务。执行结束之后Executor会讲结果汇总发送给Driver。
+
+
+\section{Spark内存管理模块分析}
 \subsection{分布式弹性数据集RDD}
 \subsection{作业执行调度模块}
 \subsection{缓存数据管理模块}
