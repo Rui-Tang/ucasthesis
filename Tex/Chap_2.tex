@@ -25,7 +25,16 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
 
 \section{Spark内存管理模块分析}
 
-lala
+Spark是一种基于内存的分布式计算框架，在计算的过程中通过将数据缓存在内存中加速计算过程。所以内存管理模块是Spark系统的核心模块。Spark内存管理机制在JVM虚拟内存管理的基础上对Executor模块拥有的内存进行了进一步的分配管理。也支持在Executor外的系统内存中直接开辟内存空间用于存储计算过程中产生的大量数据。通过使用对外内存，可以减少内存空间不足导致的垃圾回收以及内存不足错误。
+
+Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小由配置参数决定。内存管理模块会将内存分为四个部分。Storage Memory，Execution Memory，User Memory，Reserved Memory。四部分内存有不同的用途。
+
+\begin{enumerate}
+    \item Storage Memory 用于缓存中间数据。比如对于一份数据data1，在之后计算过程中需要重复使用。就可以调用data1.cache接口将数据缓存在Storage Memory区域。在之后计算过程中框架就可以直接从Storage Memory区域读取数据。具体来说，调用cache接口并不会立刻将数据写入缓存之中，而只是设置了STORAGE_LEVEL这个标记为MEMORY_ONLY。后续在框架执行的过程中，当data1被计算得到时，框架会检查STORAGE_LEVEL这个标记，发现为MEMORY_LEVEL后会通过memory maneger将其存入Storage Memory之中。这个过程并不会造成内存拷贝复制。memory manager只是将指向数据的引用从Execution Memory移到Storage Memory之中，并更新两个内存区域内存总量。
+    \item Execution Memory 用于框架计算过程。在计算过程中比如对于Shuffle操作，需要在内存中缓存一部分数据，再一次性写入文件系统之中，从而避免频繁磁盘IO导致的延迟。在计算的过程中数据也都存放在Executor Memory之中。比如上面所说的data1，在计算过程中一直使用Execution Memory。在计算结束之后根据STORAGE_LEVEL，如果为MEMORY_ONLY就会移到Storage Memory之中。
+    \item User Memory 为应用程序使用的内存空间。应用程序创建的各种和Spark框架无关的对象都会存在User Memory之中。
+    \item Reserved Memory 的目的是避免发生OOM（Out of Memory）错误。OOM问题的根本原因是
+\end{enumerate}
 
 \subsection{分布式弹性数据集RDD}
 \subsection{作业执行调度模块}
