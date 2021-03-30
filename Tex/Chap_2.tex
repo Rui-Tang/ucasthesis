@@ -45,10 +45,66 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
 
 弹性分布式数据集（Resilient Distributed Datasets）是Spark框架的核型概念。RDD是指一种可并行可操作的只读数据集合。RDD利用了Scala语言的特性，Scala将数据分为可变数据variable和不可变数据value。RDD中的数据被设置成不可变数据，所以在创建之后就不能再改变了，因为是不可变数据，所以很适合并行处理。RDD数据有丰富的操作，操作也分为两类，transform和action。transform操作是将一个RDD转化为另一个RDD。因为对于用户来说RDD无法直接展示，所以框架也不会立即计算。action操作是计算出一个具体的结果，比如求和，求平均数等操作。因为需要计算具体的结果，所以框架只有遇到action操作才会具体计算。RDD数据之间的操作相当于作业DAG图中的边。RDD相当于DAG图中的点。Spark框架通过DAG图的拓扑来解决容错的问题。比如data1是由data2和data3计算得到的。在DAG图中就有data1指向data2和data3的两条边。在计算data1的过程中框架会沿着这两天边检查data2和data3的状态，如果data2和data3保存在内存之中，框架会直接进行计算，如果保存在磁盘之中，框架会从磁盘中将数据加载到内存之中进行计算。如果数据完全丢失了，框架就会重新计算RDD数据。
 
-RDD之间的关系还可以进一步分类。如果转化操作的逻辑可以转化为窄依赖和宽依赖两种。窄依赖是指父RDD的每个分区只被一个子RDD的分区使用，这种依赖关系下，父子RDD之间数据交换无需进行shuffle操作，父RDD只需将数据发送给子RDD即可。宽依赖是指父RDD的分区数据会被多个子RDD的分区使用，也就是说父RDD输出的数据会被多个子RDD使用，这就需要在父子之间进行Shuffle交换数据，宽窄依赖主要用于作业调度执行。框架在执行过程中遇到一个action操作就会提交一个job，在job调度执行期间，DAGScheduler会把所有宽依赖所在的边切分，将整个DAG计算图切分成多个子图，每个子图称为一个stage，DAGScheduler将stage发送给TaskScheduler调度执行。
+RDD之间的关系还可以进一步分类。如果转化操作的逻辑可以转化为窄依赖和宽依赖两种。窄依赖是指父RDD的每个分区只被一个子RDD的分区使用，这种依赖关系下，父子RDD之间数据交换无需进行shuffle操作，父RDD只需将数据发送给子RDD即可。宽依赖是指父RDD的分区数据会被多个子RDD的分区使用，也就是说父RDD输出的数据会被多个子RDD使用，这就需要在父子之间进行Shuffle交换数据，宽窄依赖主要用于作业调度执行。框架在执行过程中遇到一个action操作就会提交一个job，在job调度执行期间，DAGScheduler会把所有宽依赖所在的边切分，将整个DAG计算图切分成多个子图，每个子图称为一个stage，DAGScheduler将stage发送给TaskScheduler调度执行每一个任务。
 
 \subsection{作业执行调度模块}
+
+调度模块主要有这几部分：ResourceManager，DAGScheduler，TaskScheduler，SchedulerBackend。其中ResourceManger用于向资源调度器，如Yarn，Mesos，Kubernetes申请资源。资源申请成功之后会启动一个Executor进程。Executor进程启动之后会向Driver进程反向注册，注册成功之后也会持续发送心跳包，同时等待Driver下发任务。收到任务后Executor会执行并上报任务执行状态。这就是资源调度的基本过程。
+
+在任务调度方面，用户的应用程序会根据RDD之间的转化关系转化成一个DAG图，之后框架会将DAG分成多个job，每个job会分成多个stage，stage中的任务会组成taskSet发送给Executor执行，这里详细解释一下这几个概念。
+
+\begin{enumerate}
+    \item Application, 用户编写的Spark应用程序，应用提交给Spark框架后框架会将应用转换成框架可以识别的DAG图，并对DAG图进行遍历，遇到action操作时框架就会给DAGScheduler提交一个Job。
+    \item Job，action操作会触发job，Driver会将RDD发送给DAGScheduler调度执行。
+    \item Stage，每个job根据RDD的宽依赖会分割成多个stage，每个stage中都包括一个TaskSet。
+    \item TaskSet，一组没有Shuffle宽依赖的Task集合。DagScheduler会将TaskSet发送给TaskScheduler调度。
+    \item Task，RDD中的一个分区对应一个Task，Task是最小的调度执行单位。
+\end{enumerate}
+
+任务调度可以分为stage级别调度和task级别调度。stage级别调度会先对DAG图进行分割。划分过程是从job的最后一个RDD开始向上回溯遍历，遇到宽依赖，也就是需要Shuffle的依赖就将RDD加入新的Stage之中。如果是窄依赖就将RDD加入当前Stage之中。这样就可以根据依赖关系将一个job切分成许多个Stage。
+
+切分成多个Stage后会根据拓扑排序的关系从前到后执行。当一个Stage的父Stage全都执行完成之后当前Stage就会被调度执行。DAGScheduler会将Stage中Task信息，包括分区信息和操作方法等序列化打包成TaskSet交给TaskScheduler，每个分区Partition都对应一个Task。提交TaskSet之后DAGScheduler会监控Stage执行状况。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.99\textwidth]{dag-scheduler-process}
+    \caption{DAG调度处理流程}
+    \label{fig:dag-scheduler-process}
+\end{figure}
+
+Task级别调度是由TaskScheduler完成的。DAGScheduler会将Stage打包成TaskSet发送给TaskScheduler。TaskScheduler会为每一个TaskSet创建一个TaskSetManager来管理TaskSet。TaskScheduler会将新的TaskSetManager加入到队列等待调度执行。TaskScheduler启动之后会启动SchedulerBackend，SchedulerBackend是负责和外界沟通的。ResourceManager申请到资源后会启动Executor。SchedulerBackend负责和Executor通信。包括接受Executor的注册信息，记录Executor的状态。SchedulerBackend管理Executor也就相当于管理这物理资源，SchedulerBackend启动之后会定时询问TaskScheduler有没有任务调度需求。具体来说SchedulerBackend会给SchedulerBackend上报Executor剩余的资源，TaskScheduler会根据资源总量同时根据配置的调度策略调度一定数量的Task执行。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.99\textwidth]{task-scheduler-process}
+    \caption{Task调度处理流程}
+    \label{fig:task-scheduler-process}
+\end{figure}
+
+TaskSet被封装成TaskSetManager，TaskScheduler通过树形结构管理TaskSetManager。树的根节点类型为Schedule，叶子节点为TaskSetManager，中间非叶节点为Pool。TaskScheduler有两种调度策略，FIFO策略和FAIR策略。使用FIFO策略时TaskSetManager是以先来先出的方式进入队列。结构大概如\ref{fig:scheduler-fifo-tree}所示。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.99\textwidth]{Img/spark-scheduler-fifo-tree.png}
+    \caption{FIFO调度策略底层树结构}
+    \label{fig:scheduler-fifo-tree}
+\end{figure}
+
+FAIR调度策略用于保证多个作业的公平调度。比如有两个job，每个job的pool是不同的。FAIR调度会从根开始递归排序，首先对count-pool和take-pool排序。然后再对两个pool内部的TaskSetManager排序。排序的原则会考虑三个属性：runningTasks、minShare、Weight。通过三个属性进行比较的过程比较繁琐，最后能够保证的结果是不让资源被某些task长期占用，从而保证各个作业都能有调度执行的机会。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.99\textwidth]{Img/scheduler-fair-tree.png}
+    \caption{FAIR调度策略底层树结构}
+    \label{fig:scheduler-fair-tree}
+\end{figure}
+
 \subsection{缓存数据管理模块}
+
+缓存存储模块主要包含如下两个部分，RDD缓存和Shuffle数据缓存。缓存模块的主要工作是管理RDD缓存，包括内存和磁盘的缓存。Shuffle中间数据的管理也是有缓存管理模块完成。存储模块中管理着多种不同的数据，包括RDD数据块、Shuffle数据块、广播变量数据块、任务返回数据块、流式数据块。RDD数据块用于标记缓存的RDD数据。Shuffle数据块用于标识缓存的Shuffle数据。广播变量数据块用于标识广播变量。任务返回数据块用于标识任务赶回结果数据。流式数据块在Spark Streaming中用于标记收到的流式数据。
+
+RDD数据在缓存之前一般拥有多个
+
 \section{缓存管理模块分析}
 \subsection{Shuffle缓存}
 \subsection{Storage缓存}
