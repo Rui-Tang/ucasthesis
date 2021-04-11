@@ -2,6 +2,13 @@
 \section{Spark系统实现概述概述}
 Spark是一种基于内存的分布式计算框架。Spark框架分为四层：用户层、作业管理执行层、资源任务调度层、物理执行层。在用户层，用户需要使用框架api编写应用代码，准备输入数据，配置应用参数。用户将这些信息提交给作业管理执行层后，框架会将用户应用转化为具体的作业执行计划，分为逻辑处理计划（数据单元和数据处理依赖关系）和物理执行计划（具体执行计划和阶段）。生成了具体的执行计划之后，框架的资源任务调度层会向集群资源管理器申请资源，资源申请成功后，框架把具体任务和资源绑定，并发送作业执行计划给物理执行层。物理执行层收到作业执行计划之后，会根据作业的配置信息下载应用代码，运行任务并将执行结果反馈给框架。下面会对Spark框架的四层进行进一步的介绍。
 
+\begin{figure}
+    \centering
+    \includegraphics[width=0.99\textwidth]{Img/spark-distribution-framework.png}
+    \caption{Spark 分布式架构}
+    \label{fig:spark-framework}
+\end{figure}
+
 \begin{enumerate}
     \item 用户层：用户层提供了丰富的应用接口。包括面向结构化数据的查询接口Spark SQL，面向图计算的GraphX、面向机器学习的Spark MLlib，面向实时流计算的Spark Stream。用户使用提供的接口可以实现丰富的应用程序。
     \item 作业管理执行层：框架收到用户提交的应用程序后，就将其解析成Spark可以识别的逻辑执行计划。比如对于Spark SQL作业，会通过SQL语言的解释器将SQL语句解释为Spark可识别的作业执行计划，一般是以DAG（Directed Acycilc Graph）有向无环图结构组成的作业执行计划。Spark框架会遍历DAG，如果遇到需要Shuffle的边就会对当前边进行切割。遍历完毕之后整个DAG被切割成多个子图，每个子图都会更具拓扑顺序从前到后逐渐调度执行。
@@ -18,9 +25,24 @@ Spark Driver，Spark驱动程序是指运行Spark应用main函数的进程，它
 
 Executor，Spark执行器是Spark集群的一个资源单位。Spark Driver会向Yarn、K8s等资源调度器申请资源，资源分配成功之后会启动一个Executor进程。之后Spark Driver通过DAGScheduler和TaskScheduler调度执行作业，并通过SchedulerBackend将具体任务发送给Executor。Executor收到任务请求后会在本地JVM虚拟机创建进程执行任务。
 
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-scheduler-detail.png}
+    \caption{调度执行模块结构图}
+    \label{fig:scheduler-models}
+\end{figure}
+
 Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个计算任务，然后调度给Executor执行。Task是最小的计算任务，Executor会给每个Task分配一个JVM进程，执行具体的计算任务，如Map算子、Filter算子、Reduce算子等。Executor一般会占用多个CPU，Task一般使用一个CPU，所以Executor中可以执行多个Task，所有Task共享Executor的内存。
 
 这几个概念中Driver需要进一步解释。Driver包含SparkContext对象，SparkContext会将应用程序转化成一个DAG图，之后遍历DAG图，如果遇到一个action操作，也就是需要具体计算结果的操作，SparkContext就会给DAGScheduler提交一个Job。DAGScheduler收到Job请求之后会从后向前遍历作业，如果遇到边是窄依赖，就会将当前节点加入当前Stage，如果遇到的边是宽依赖，也就是需要Shuffle的边，DAGScheduler就会创建一个新的Stage，并将该节点加入新的Stage之中。遍历结束之后会得到许多个Stage，DAGScheduler会将Stage打包成TaskSet后发送给TaskScheduler执行。TaskScheduler后根据调度策略选择合适的Executor调度执行计算任务。执行结束之后Executor会讲结果汇总发送给Driver。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.99\textwidth]{Img/spark-submit-time.png}
+    \caption{Spark应用提交运行流程}
+    \label{fig:spark-submit-job}
+\end{figure}
+
 
 \section{作业执行调度模块}
 
@@ -36,7 +58,15 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
     \item Task，RDD中的一个分区对应一个Task，Task是最小的调度执行单位。
 \end{enumerate}
 
+\begin{figure}
+    \centering
+    \includegraphics[width=0.99\textwidth]{Img/spark-scheduler-overview.png}
+    \caption{Spark应用调度流程}
+    \label{fig:application-schedule-process}
+\end{figure}
+
 任务调度可以分为stage级别调度和task级别调度。stage级别调度会先对DAG图进行分割。划分过程是从job的最后一个RDD开始向上回溯遍历，遇到宽依赖，也就是需要Shuffle的依赖就将RDD加入新的Stage之中。如果是窄依赖就将RDD加入当前Stage之中。这样就可以根据依赖关系将一个job切分成许多个Stage。
+
 
 切分成多个Stage后会根据拓扑排序的关系从前到后执行。当一个Stage的父Stage全都执行完成之后当前Stage就会被调度执行。DAGScheduler会将Stage中Task信息，包括分区信息和操作方法等序列化打包成TaskSet交给TaskScheduler，每个分区Partition都对应一个Task。提交TaskSet之后DAGScheduler会监控Stage执行状况。
 
@@ -95,9 +125,42 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
 
 \subsection{弹性分布式数据集RDD}
 
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-readonly.png}
+    \caption{只读弹性分布式数据集RDD}
+    \label{fig:rdd}
+\end{figure}
+
 弹性分布式数据集（Resilient Distributed Datasets）是Spark框架的核型概念。RDD是指一种可并行可操作的只读数据集合。RDD利用了Scala语言的特性，Scala将数据分为可变数据variable和不可变数据value。RDD中的数据被设置成不可变数据，所以在创建之后就不能再改变了，因为是不可变数据，所以很适合并行处理。RDD数据有丰富的操作，操作也分为两类，transform和action。transform操作是将一个RDD转化为另一个RDD。因为对于用户来说RDD无法直接展示，所以框架也不会立即计算。action操作是计算出一个具体的结果，比如求和，求平均数等操作。因为需要计算具体的结果，所以框架只有遇到action操作才会具体计算。RDD数据之间的操作相当于作业DAG图中的边。RDD相当于DAG图中的点。Spark框架通过DAG图的拓扑来解决容错的问题。比如data1是由data2和data3计算得到的。在DAG图中就有data1指向data2和data3的两条边。在计算data1的过程中框架会沿着这两天边检查data2和data3的状态，如果data2和data3保存在内存之中，框架会直接进行计算，如果保存在磁盘之中，框架会从磁盘中将数据加载到内存之中进行计算。如果数据完全丢失了，框架就会重新计算RDD数据。
 
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-transformations-actions.png}
+    \caption{transformation和action算子}
+    \label{fig:rdd-transformation-action}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-dependency.png}
+    \caption{宽依赖与窄依赖}
+    \label{fig:rdd-dependency}
+\end{figure}
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-dag.png}
+    \caption{stage划分示意图}
+    \label{fig:rdd-dag-stage}
+\end{figure}
+
 RDD之间的关系还可以进一步分类。如果转化操作的逻辑可以转化为窄依赖和宽依赖两种。窄依赖是指父RDD的每个分区只被一个子RDD的分区使用，这种依赖关系下，父子RDD之间数据交换无需进行shuffle操作，父RDD只需将数据发送给子RDD即可。宽依赖是指父RDD的分区数据会被多个子RDD的分区使用，也就是说父RDD输出的数据会被多个子RDD使用，这就需要在父子之间进行Shuffle交换数据，宽窄依赖主要用于作业调度执行。框架在执行过程中遇到一个action操作就会提交一个job，在job调度执行期间，DAGScheduler会把所有宽依赖所在的边切分，将整个DAG计算图切分成多个子图，每个子图称为一个stage，DAGScheduler将stage发送给TaskScheduler调度执行每一个任务。
+
+
+
+
 
 \subsection{缓存数据管理模块}
 
@@ -107,7 +170,47 @@ BlockManager模块用于管理各种缓存数据。RDD分区数据，Shuffle数�
 
 Driver初始化的时候会创建BlockManager的时候会创建一个BlockManagerMasterEndpoint，之后Driver会将BlockManagerMasterEndpoint发送给Executor节点，Executor节点收到后会创建自己的BlockManager，并且通过BlockManagerMasterEndpoint向Driver节点上报注册信息。
 
+
 BlockManager模块有MemoryStore和DiskStore两个模块用以存储block。DiskStore使用磁盘存储缓存数据，DiskStore中有一个成员DiskStoreManager，它的主要作用是管理逻辑block和物理block之间的映射关系，DiskStore中的block对应文件系统中的一个文件。DiskStore接收到缓存请求的时候会根据规则创建一个文件并将文件写入文件之中。MemoryStore使用Executor的JVM堆内存存储数据。MemoryStore中维护了一个LinkedHashMap来管理所有的block，Scala语言的LinkedHashMap底层通过链表存储数据，会将访问的数据移到链表头部。所以LinkedHashMap是具有LRU的特性的。MemoryStore模块就是巧妙地利用LinkedHashMap实现LRU替换策略的。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-cache.png}
+    \caption{数据缓存示意图}
+    \label{fig:rdd-cache}
+\end{figure}
+
+\section{应用举例}
+
+这里介绍一个简单的spark应用程序实例WordCount，统计一个数据集中每个单词出现的次数，首先将从hdfs中加载数据得到原始RDD-0，其中每条记录为数据中的一行句子，经过一个flatMap操作，将一行句子切分为多个独立的词，得到RDD-1，再通过map操作将每个词映射为key-value形式，其中key为词本身，value为初始计数值1，得到RDD-2，将RDD-2中的所有记录归并，统计每个词的计数，得到RDD-3，最后将其保存到hdfs。这个应用程序转化为DAG图结构如图\ref{fig:word-count}所示。
+
+\begin{lstlisting}[language=Scala]
+import org.apache.spark._
+import SparkContext._
+
+object WordCount {
+  def main(args: Array[String]) {
+    if (args.length < 2) {
+      System.err.println("Usage: WordCount <inputfile> <outputfile>");
+      System.exit(1);
+    }
+    val conf = new SparkConf().setAppName("WordCount")
+    val sc = new SparkContext(conf)
+    val result = sc.textFile(args(0))
+                   .flatMap(line => line.split(" "))
+                   .map(word => (word, 1))
+                   .reduceByKey(_ + _)
+    result.saveAsTextFile(args(1))
+  }
+}
+\end{lstlisting}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-wordcount.png}
+    \caption{wordCount程序DAG图}
+    \label{fig:word-count}
+\end{figure}
 
 \section{本章总结}
 
