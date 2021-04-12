@@ -297,7 +297,7 @@ left outer join的原理如图\ref{fig:leftoute-join}所示。left outer join以
     \label{fig:leftouter-join}
 \end{figure}
 
-right outer join的原理如图\ref{fig:rightouter-join}所示。right outer join
+right outer join的原理如图\ref{fig:rightouter-join}所示。right outer join以右表为准，对于右表中的每一行记录，根据join条件计算得到keyB，然后根据keyB去坐标中查找条件相同的记录，如果查找失败会得到一个全为null的记录，如果查找成功就会和右表形成完整的记录。最终根据join的过滤条件得到最终的结果。
 
 \begin{figure}
     \centering
@@ -306,6 +306,33 @@ right outer join的原理如图\ref{fig:rightouter-join}所示。right outer joi
     \label{fig:rightouter-join}
 \end{figure}
 
+
+full outer join的原理如图\ref{fig:fullouter-join}所示，full outer join相对来说要更复杂一点，底层采用sort merge join实现。因为两个表已经排序，首先分别顺序从左表和右表中取出一条记录，比较key，如果key相同，则将rowA和rowB合并在一起，并且取出两表的下一条记录作为新的rowA和rowB。如果keyA<keyB，则说明右表中没有与左表rowA对应的记录，那么rowA指向下一条记录。如果keyA>keyB，说明左表中中没有与右表rowB对应的记录，那么rowB更新到右表的下一条记录，重复这个过程知道左右两张表的记录全部处理完成。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-fullouter-join.png}
+    \caption{full outer Join实现原理}
+    \label{fig:fullouter-join}
+\end{figure}
+
+left semi join的原理如图\ref{fig:semi-join}所示。left semi join以左表为准，在右表中查找匹配的记录，如果查找成功就返回左边的记录。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-semi-join.png}
+    \caption{semi Join实现原理}
+    \label{fig:semi-join}
+\end{figure}
+
+left anti join的原理如图\ref{fig:anti-join}所示，以左表为准，在右表中查找匹配的记录，如果查找成功，就返回左边的记录。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-anti-join.png}
+    \caption{anti Join实现原理}
+    \label{fig:anti-join}
+\end{figure}
 
 \section{应用举例}
 
