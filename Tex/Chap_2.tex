@@ -180,6 +180,43 @@ BlockManager模块有MemoryStore和DiskStore两个模块用以存储block。Disk
     \label{fig:rdd-cache}
 \end{figure}
 
+\section{Shuffle原理解析}
+
+在传统Hadoop系统之中Shuffle是连接Map操作和Reduce操作的桥梁，在Spark之中Shuffle操作使用场景更多。Shuffle操作将map的输出对应到reduce的输入中，Shuffle操作涉及到序列化和反序列化、跨节点网络通信IO以及磁盘读写IO等。所以说Shuffle操作是整个应用程序运行过程中非常重要的一个阶段。
+
+Spark的Shuffle实现大致如图\ref{fig:shuffle-overview}所示，对于一个DAG计算图，以Shuffle操作为界，划分stage，上游stage为map阶段，下游stage为reduce阶段。map阶段的每一个任务计算得到一个分区，将分区数据分成多份，每一份发送给下游stage对应的分区，并且将临时结果写入磁盘，这个过程叫做shuffle write；下游stage为reduce task，每个reduce task通过网络拉去上游stage中所有map task的指定分区结果数据，该过程叫做shuffle read，最后完成整个计算过程。这里举一个例子说明，例如上游stage有M个map task，下游stage有N个reduce task，那么上游stage的每个map task都会将输出数据分为N份。下游stage的每个reduce task会从上游拉去M个数据。整个Shuffle过程会产生$M \times N$个临时小文件，每个小文件都要写入磁盘，导致大量碎片写磁盘操作，每个小文件也会通过网络传输给下游节点，造成大量网络传输。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-shuffle-overview.png}
+    \caption{Hash Shuffle V1原理图}
+    \label{fig:shuffle-overview}
+\end{figure}
+
+为了解决这些问题，Spark进行了一系列的优化，如图\ref{fig:shuffle-v2}为了减少临时小文件的数量，Spark使用将map task输出的小文件合并到同一个文件，这样下游的reduce task只需要一次性从上游拉去一个文件，大大减少了碎片文件传输的问题。但是假如下游stage的分区数量N很大，还是会在每个Executor节点生成N个文件。如果一个Executor上有K个task，会有$K \times N$个file writer，总体上来没有从根本上解决问题。
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-shuffle-v2.png}
+    \caption{Hash Shuffle V2原理图}
+    \label{fig:shuffle-v2}
+\end{figure}
+
+
+针对Hash Shuffle存在的问题，Spark引入了Sort Shuffle。在map阶段的shuffle write操作，会按照paitition id以及key对记录进行排序，将所有partition的数据写入同一个文件中，该文件中的数据会按照partition id排序存放，每个partition内部按照key进行排序存放，map task会按照顺序写每个partition的数据，并通过索引文件记录每个partition的大小和偏移量。这样每个map task只需要开启两个file writer，一个写数据，一个写索引，大大减轻了Hash Shuffle存在的大量file writer的问题，如果一个executor有K个task，最多一次性会开启$K \times 2$个文件描述符。在reduce阶段，reduce task拉去数据做combine操作时不再使用HashMap，而是采用ExternalAppendOnlyMap，该数据结构在做combine操作时，如果内存不足会将数据写入磁盘之中，这就保证了系统的鲁棒性。避免了数据量比较大情况下OOM的问题。
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/sort-shuffle.png}
+    \caption{Sort Shuffle原理图}
+    \label{fig:sort-shuffle}
+\end{figure}
+
+
+\section{join算子解析}
+
 \section{应用举例}
 
 这里介绍一个简单的spark应用程序实例WordCount，统计一个数据集中每个单词出现的次数，首先将从hdfs中加载数据得到原始RDD-0，其中每条记录为数据中的一行句子，经过一个flatMap操作，将一行句子切分为多个独立的词，得到RDD-1，再通过map操作将每个词映射为key-value形式，其中key为词本身，value为初始计数值1，得到RDD-2，将RDD-2中的所有记录归并，统计每个词的计数，得到RDD-3，最后将其保存到hdfs。这个应用程序转化为DAG图结构如图\ref{fig:word-count}所示。
