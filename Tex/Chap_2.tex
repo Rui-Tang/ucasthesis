@@ -217,6 +217,96 @@ Spark的Shuffle实现大致如图\ref{fig:shuffle-overview}所示，对于一个
 
 \section{join算子解析}
 
+Join算子是Spark最重要的底层算子之一，所以非常有必要单独详细解析join操作的实现原理。Join操作主要有两种使用场景，第一种用于Spark SQL之中，另一种是通过DateFrame编写Spark应用程序。通过语法分析、一系列查询优化之后会得到逻辑执行计划，最后映射为物理执行计划，转化为DAG执行。
+
+Join操作具有三大要素：Join方式、Join条件和过滤条件。Spark支持图\ref{fig:join-overview}所示的6中Join操作，每种Join操作还有不同的实现方式。
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-join-overview.png}
+    \caption{Join操作三要素}
+    \label{fig:join-overview}
+\end{figure}
+
+Join的基本实现方式如图\ref{fig:join-basic}所示。Spark会将参与Join操作的两张表抽象为流式遍历表(streamIter)和查找表(buildIter)。通常streamIter为大表，buildIter为小表。在计算过程中Spark会遍历streamIter中的每一条记录，每次从streamIter中读取一行记录rowA，根据Join条件计算keyA，然后根据keyA去buildIter中查找满足Join条件(keyA==keyB)的记录rowBs，并将rowBs中每条记录分别与rowA进行指定的join操作得到临时结果，最后根据过滤条件得到最终的join的结果。
+
+根据对join过程的分析可以发现，对于streamIter的每条记录，都要在buildIter中查找匹配的记录，所以buildIter一定需要时查找性能比较好的数据结构。Spark提供了三种Join实现：Sort Merge Join、Broadcast Join以及Hash Join。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-join-basic.png}
+    \caption{Join操作基本原理}
+    \label{fig:join-basic}
+\end{figure}
+
+Sort Merge Join实现原理如图\ref{fig:sort-join}所示，join操作要将两条记录合并在一起。首先需要将具有共同key的记录存放在同一个分区之中，所以需要做一次shuffle将具有相同key的记录存放到相同分区之中，map阶段根据join条件确定每个记录的key，使用该key做shuffle write，将可能join到一起的记录分到同一个分区之中，这样在shuffle read阶段就可以将两个表中具有相同key的记录在同一个分区中处理。因为buildIter需要是查找性能比较好的数据结构，一般会自然的想到哈希表，但是对于一张比较大的表来说，因为内存空间相对有限，所以不可能将所有记录存放在hash表中。也可以对buildIter进行排序，查找时通过二分查找，这样查找代价为$O(log_n)$, 查询代价也是比较小的。根据上一节对shuffle原理的分析可以发现Spark目前使用的SortShuffle本来就会对partition中的数据排序。所以buildIter经过shuffle之后是排序完成的，直接使用二分查找就可以迅速找到buildIter中的记录。在shuffle read阶段，分别对streamIter和buildIter进行merge sort，在遍历streamIter中的记录时，对于每一条记录都采用二分查找从buildIter中查找对应的记录，由于两个表都是排序的，每次处理完streamIter的一条记录后，对于streamIter的下一条记录，只需要从buildIter中上一次查找结束的位置开始顺序查找，所以不需要每次都在buildIter中进行二分查找，假设streamIter记录数为M，buildIter记录数为N。那么sort merge join的时间复杂度实际为$O(M+N)$，性能是非常好的。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-sort-join.png}
+    \caption{sort Join实现原理}
+    \label{fig:sort-join}
+\end{figure}
+
+Broadcast Join使用了全新的思路，具体过程如图\ref{fig:broadcast-join}所示。为了能将具有相同key的记录分配到同一个分区之中，一般需要使用shuffle实现，但是在buildIter是非常小的表的场景下，那么就没有必要通过shuffle操作实现，因为shuffle的计算代价是非常大的。在buildIter非常小的情况下，可以直接将buildIter广播到每个计算节点，然后将buildIter放在hash表中。通常这种join被称为map join。当buildIter的估计大小不超过参数$spark.sql.autoBroadcastJoinThreshold$设定的值（默认为10MB）,就会自动采用broadcast join。
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-broadcast-join.png}
+    \caption{Broadcast Join实现原理}
+    \label{fig:broadcast-join}
+\end{figure}
+
+hash join是林外一种实现方式，具体过程如图\ref{fig:hash-join}所示。在shuffle read阶段不对记录排序，来自两个表具有相同key的记录会在同一个分区之中，在分区中不排序，将buildIter的记录放在hash表中，以便查找。这种情况下buildIter的记录放在hash表中，那么每个分区来自buildIter的记录不能太大，否则就无法存放在内存之中，默认情况下hash join是关闭的，需要满足以下四个条件才能使用hash join
+
+\begin{itemize}
+    \item buildIter的总体估计大小超过$spark.sql.autoBroadcastJoinThreshold$设定的值，不能满足broadcast join的条件
+    \item 开始使用hash join的开关，$spark.sql.join.preferSortMergeJoin=false$
+    \item 每个分区的平均大小不超过$spark.sql.autoBroadcastJoinThreshold$设定的值
+    \item streamIter的大小是buildIter的三倍以上
+\end{itemize}
+
+可见使用hash join的条件非常苛刻，在大多数实际场景下，hash join和sort merge join的性能也不会有太大的区别，因为hash join也需要shuffle操作。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-hash-join.png}
+    \caption{hash Join实现原理}
+    \label{fig:hash-join}
+\end{figure}
+
+下面再简单介绍不同join操作的实现方式。
+
+inner join原理如图\ref{fig:inner-join}，inner join需要找到左右表中满足join条件的记录，在buildIter查找记录时，如果右表不存在满足join条件的记录就跳过。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-inner-join.png}
+    \caption{inner Join实现原理}
+    \label{fig:inner-join}
+\end{figure}
+
+left outer join的原理如图\ref{fig:leftoute-join}所示。left outer join以左表为准，根据join条件得到keyA，根据join条件在右表中查找满足匹配条件的记录，如果查找失败，则返回一个所有字段都为null的记录。如果查找成功就和左表组成一个新的记录。最后通过join的过滤条件过滤得到最后的结果。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-leftouter-join.png}
+    \caption{left outer Join实现原理}
+    \label{fig:leftouter-join}
+\end{figure}
+
+right outer join的原理如图\ref{fig:rightouter-join}所示。right outer join
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-sql-rightouter-join.png}
+    \caption{right outer Join实现原理}
+    \label{fig:rightouter-join}
+\end{figure}
+
+
 \section{应用举例}
 
 这里介绍一个简单的spark应用程序实例WordCount，统计一个数据集中每个单词出现的次数，首先将从hdfs中加载数据得到原始RDD-0，其中每条记录为数据中的一行句子，经过一个flatMap操作，将一行句子切分为多个独立的词，得到RDD-1，再通过map操作将每个词映射为key-value形式，其中key为词本身，value为初始计数值1，得到RDD-2，将RDD-2中的所有记录归并，统计每个词的计数，得到RDD-3，最后将其保存到hdfs。这个应用程序转化为DAG图结构如图\ref{fig:word-count}所示。
