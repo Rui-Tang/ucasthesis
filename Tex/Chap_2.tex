@@ -2,7 +2,7 @@
 \section{Spark系统实现概述概述}
 Spark是一种基于内存的分布式计算框架。Spark框架分为四层：用户层、作业管理执行层、资源任务调度层、物理执行层。在用户层，用户需要使用框架api编写应用代码，准备输入数据，配置应用参数。用户将这些信息提交给作业管理执行层后，框架会将用户应用转化为具体的作业执行计划，分为逻辑处理计划（数据单元和数据处理依赖关系）和物理执行计划（具体执行计划和阶段）。生成了具体的执行计划之后，框架的资源任务调度层会向集群资源管理器申请资源，资源申请成功后，框架把具体任务和资源绑定，并发送作业执行计划给物理执行层。物理执行层收到作业执行计划之后，会根据作业的配置信息下载应用代码，运行任务并将执行结果反馈给框架。下面会对Spark框架的四层进行进一步的介绍。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.99\textwidth]{Img/spark-distribution-framework.png}
     \caption{Spark 分布式架构}
@@ -25,7 +25,7 @@ Spark Driver，Spark驱动程序是指运行Spark应用main函数的进程，它
 
 Executor，Spark执行器是Spark集群的一个资源单位。Spark Driver会向Yarn、K8s等资源调度器申请资源，资源分配成功之后会启动一个Executor进程。之后Spark Driver通过DAGScheduler和TaskScheduler调度执行作业，并通过SchedulerBackend将具体任务发送给Executor。Executor收到任务请求后会在本地JVM虚拟机创建进程执行任务。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-scheduler-detail.png}
     \caption{调度执行模块结构图}
@@ -36,7 +36,7 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
 
 这几个概念中Driver需要进一步解释。Driver包含SparkContext对象，SparkContext会将应用程序转化成一个DAG图，之后遍历DAG图，如果遇到一个action操作，也就是需要具体计算结果的操作，SparkContext就会给DAGScheduler提交一个Job。DAGScheduler收到Job请求之后会从后向前遍历作业，如果遇到边是窄依赖，就会将当前节点加入当前Stage，如果遇到的边是宽依赖，也就是需要Shuffle的边，DAGScheduler就会创建一个新的Stage，并将该节点加入新的Stage之中。遍历结束之后会得到许多个Stage，DAGScheduler会将Stage打包成TaskSet后发送给TaskScheduler执行。TaskScheduler后根据调度策略选择合适的Executor调度执行计算任务。执行结束之后Executor会讲结果汇总发送给Driver。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.99\textwidth]{Img/spark-submit-time.png}
     \caption{Spark应用提交运行流程}
@@ -58,7 +58,7 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
     \item Task，RDD中的一个分区对应一个Task，Task是最小的调度执行单位。
 \end{enumerate}
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.99\textwidth]{Img/spark-scheduler-overview.png}
     \caption{Spark应用调度流程}
@@ -70,7 +70,7 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
 
 切分成多个Stage后会根据拓扑排序的关系从前到后执行。当一个Stage的父Stage全都执行完成之后当前Stage就会被调度执行。DAGScheduler会将Stage中Task信息，包括分区信息和操作方法等序列化打包成TaskSet交给TaskScheduler，每个分区Partition都对应一个Task。提交TaskSet之后DAGScheduler会监控Stage执行状况。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.99\textwidth]{dag-scheduler-process}
     \caption{DAG调度处理流程}
@@ -79,7 +79,7 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
 
 Task级别调度是由TaskScheduler完成的。DAGScheduler会将Stage打包成TaskSet发送给TaskScheduler。TaskScheduler会为每一个TaskSet创建一个TaskSetManager来管理TaskSet。TaskScheduler会将新的TaskSetManager加入到队列等待调度执行。TaskScheduler启动之后会启动SchedulerBackend，SchedulerBackend是负责和外界沟通的。ResourceManager申请到资源后会启动Executor。SchedulerBackend负责和Executor通信。包括接受Executor的注册信息，记录Executor的状态。SchedulerBackend管理Executor也就相当于管理这物理资源，SchedulerBackend启动之后会定时询问TaskScheduler有没有任务调度需求。具体来说SchedulerBackend会给SchedulerBackend上报Executor剩余的资源，TaskScheduler会根据资源总量同时根据配置的调度策略调度一定数量的Task执行。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.99\textwidth]{task-scheduler-process}
     \caption{Task调度处理流程}
@@ -88,7 +88,7 @@ Task级别调度是由TaskScheduler完成的。DAGScheduler会将Stage打包成T
 
 TaskSet被封装成TaskSetManager，TaskScheduler通过树形结构管理TaskSetManager。树的根节点类型为Schedule，叶子节点为TaskSetManager，中间非叶节点为Pool。TaskScheduler有两种调度策略，FIFO策略和FAIR策略。使用FIFO策略时TaskSetManager是以先来先出的方式进入队列。结构大概如\ref{fig:scheduler-fifo-tree}所示。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.99\textwidth]{Img/spark-scheduler-fifo-tree.png}
     \caption{FIFO调度策略底层树结构}
@@ -97,7 +97,7 @@ TaskSet被封装成TaskSetManager，TaskScheduler通过树形结构管理TaskSet
 
 FAIR调度策略用于保证多个作业的公平调度。比如有两个job，每个job的pool是不同的。FAIR调度会从根开始递归排序，首先对count-pool和take-pool排序。然后再对两个pool内部的TaskSetManager排序。排序的原则会考虑三个属性：runningTasks、minShare、Weight。通过三个属性进行比较的过程比较繁琐，最后能够保证的结果是不让资源被某些task长期占用，从而保证各个作业都能有调度执行的机会。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.99\textwidth]{Img/scheduler-fair-tree.png}
     \caption{FAIR调度策略底层树结构}
@@ -125,7 +125,7 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
 
 \subsection{弹性分布式数据集RDD}
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/rdd-readonly.png}
     \caption{只读弹性分布式数据集RDD}
@@ -134,14 +134,14 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
 
 弹性分布式数据集（Resilient Distributed Datasets）是Spark框架的核型概念。RDD是指一种可并行可操作的只读数据集合。RDD利用了Scala语言的特性，Scala将数据分为可变数据variable和不可变数据value。RDD中的数据被设置成不可变数据，所以在创建之后就不能再改变了，因为是不可变数据，所以很适合并行处理。RDD数据有丰富的操作，操作也分为两类，transform和action。transform操作是将一个RDD转化为另一个RDD。因为对于用户来说RDD无法直接展示，所以框架也不会立即计算。action操作是计算出一个具体的结果，比如求和，求平均数等操作。因为需要计算具体的结果，所以框架只有遇到action操作才会具体计算。RDD数据之间的操作相当于作业DAG图中的边。RDD相当于DAG图中的点。Spark框架通过DAG图的拓扑来解决容错的问题。比如data1是由data2和data3计算得到的。在DAG图中就有data1指向data2和data3的两条边。在计算data1的过程中框架会沿着这两天边检查data2和data3的状态，如果data2和data3保存在内存之中，框架会直接进行计算，如果保存在磁盘之中，框架会从磁盘中将数据加载到内存之中进行计算。如果数据完全丢失了，框架就会重新计算RDD数据。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/rdd-transformations-actions.png}
     \caption{transformation和action算子}
     \label{fig:rdd-transformation-action}
 \end{figure}
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/rdd-dependency.png}
     \caption{宽依赖与窄依赖}
@@ -149,7 +149,7 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
 \end{figure}
 
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/rdd-dag.png}
     \caption{stage划分示意图}
@@ -157,10 +157,6 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
 \end{figure}
 
 RDD之间的关系还可以进一步分类。如果转化操作的逻辑可以转化为窄依赖和宽依赖两种。窄依赖是指父RDD的每个分区只被一个子RDD的分区使用，这种依赖关系下，父子RDD之间数据交换无需进行shuffle操作，父RDD只需将数据发送给子RDD即可。宽依赖是指父RDD的分区数据会被多个子RDD的分区使用，也就是说父RDD输出的数据会被多个子RDD使用，这就需要在父子之间进行Shuffle交换数据，宽窄依赖主要用于作业调度执行。框架在执行过程中遇到一个action操作就会提交一个job，在job调度执行期间，DAGScheduler会把所有宽依赖所在的边切分，将整个DAG计算图切分成多个子图，每个子图称为一个stage，DAGScheduler将stage发送给TaskScheduler调度执行每一个任务。
-
-
-
-
 
 \subsection{缓存数据管理模块}
 
@@ -173,7 +169,7 @@ Driver初始化的时候会创建BlockManager的时候会创建一个BlockManage
 
 BlockManager模块有MemoryStore和DiskStore两个模块用以存储block。DiskStore使用磁盘存储缓存数据，DiskStore中有一个成员DiskStoreManager，它的主要作用是管理逻辑block和物理block之间的映射关系，DiskStore中的block对应文件系统中的一个文件。DiskStore接收到缓存请求的时候会根据规则创建一个文件并将文件写入文件之中。MemoryStore使用Executor的JVM堆内存存储数据。MemoryStore中维护了一个LinkedHashMap来管理所有的block，Scala语言的LinkedHashMap底层通过链表存储数据，会将访问的数据移到链表头部。所以LinkedHashMap是具有LRU的特性的。MemoryStore模块就是巧妙地利用LinkedHashMap实现LRU替换策略的。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/rdd-cache.png}
     \caption{数据缓存示意图}
@@ -186,7 +182,7 @@ BlockManager模块有MemoryStore和DiskStore两个模块用以存储block。Disk
 
 Spark的Shuffle实现大致如图\ref{fig:shuffle-overview}所示，对于一个DAG计算图，以Shuffle操作为界，划分stage，上游stage为map阶段，下游stage为reduce阶段。map阶段的每一个任务计算得到一个分区，将分区数据分成多份，每一份发送给下游stage对应的分区，并且将临时结果写入磁盘，这个过程叫做shuffle write；下游stage为reduce task，每个reduce task通过网络拉去上游stage中所有map task的指定分区结果数据，该过程叫做shuffle read，最后完成整个计算过程。这里举一个例子说明，例如上游stage有M个map task，下游stage有N个reduce task，那么上游stage的每个map task都会将输出数据分为N份。下游stage的每个reduce task会从上游拉去M个数据。整个Shuffle过程会产生$M \times N$个临时小文件，每个小文件都要写入磁盘，导致大量碎片写磁盘操作，每个小文件也会通过网络传输给下游节点，造成大量网络传输。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-shuffle-overview.png}
     \caption{Hash Shuffle V1原理图}
@@ -196,7 +192,7 @@ Spark的Shuffle实现大致如图\ref{fig:shuffle-overview}所示，对于一个
 为了解决这些问题，Spark进行了一系列的优化，如图\ref{fig:shuffle-v2}为了减少临时小文件的数量，Spark使用将map task输出的小文件合并到同一个文件，这样下游的reduce task只需要一次性从上游拉去一个文件，大大减少了碎片文件传输的问题。但是假如下游stage的分区数量N很大，还是会在每个Executor节点生成N个文件。如果一个Executor上有K个task，会有$K \times N$个file writer，总体上来没有从根本上解决问题。
 
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-shuffle-v2.png}
     \caption{Hash Shuffle V2原理图}
@@ -207,7 +203,7 @@ Spark的Shuffle实现大致如图\ref{fig:shuffle-overview}所示，对于一个
 针对Hash Shuffle存在的问题，Spark引入了Sort Shuffle。在map阶段的shuffle write操作，会按照paitition id以及key对记录进行排序，将所有partition的数据写入同一个文件中，该文件中的数据会按照partition id排序存放，每个partition内部按照key进行排序存放，map task会按照顺序写每个partition的数据，并通过索引文件记录每个partition的大小和偏移量。这样每个map task只需要开启两个file writer，一个写数据，一个写索引，大大减轻了Hash Shuffle存在的大量file writer的问题，如果一个executor有K个task，最多一次性会开启$K \times 2$个文件描述符。在reduce阶段，reduce task拉去数据做combine操作时不再使用HashMap，而是采用ExternalAppendOnlyMap，该数据结构在做combine操作时，如果内存不足会将数据写入磁盘之中，这就保证了系统的鲁棒性。避免了数据量比较大情况下OOM的问题。
 
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/sort-shuffle.png}
     \caption{Sort Shuffle原理图}
@@ -222,7 +218,7 @@ Join算子是Spark最重要的底层算子之一，所以非常有必要单独�
 Join操作具有三大要素：Join方式、Join条件和过滤条件。Spark支持图\ref{fig:join-overview}所示的6中Join操作，每种Join操作还有不同的实现方式。
 
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-join-overview.png}
     \caption{Join操作三要素}
@@ -233,7 +229,7 @@ Join的基本实现方式如图\ref{fig:join-basic}所示。Spark会将参与Joi
 
 根据对join过程的分析可以发现，对于streamIter的每条记录，都要在buildIter中查找匹配的记录，所以buildIter一定需要时查找性能比较好的数据结构。Spark提供了三种Join实现：Sort Merge Join、Broadcast Join以及Hash Join。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-join-basic.png}
     \caption{Join操作基本原理}
@@ -242,7 +238,7 @@ Join的基本实现方式如图\ref{fig:join-basic}所示。Spark会将参与Joi
 
 Sort Merge Join实现原理如图\ref{fig:sort-join}所示，join操作要将两条记录合并在一起。首先需要将具有共同key的记录存放在同一个分区之中，所以需要做一次shuffle将具有相同key的记录存放到相同分区之中，map阶段根据join条件确定每个记录的key，使用该key做shuffle write，将可能join到一起的记录分到同一个分区之中，这样在shuffle read阶段就可以将两个表中具有相同key的记录在同一个分区中处理。因为buildIter需要是查找性能比较好的数据结构，一般会自然的想到哈希表，但是对于一张比较大的表来说，因为内存空间相对有限，所以不可能将所有记录存放在hash表中。也可以对buildIter进行排序，查找时通过二分查找，这样查找代价为$O(log_n)$, 查询代价也是比较小的。根据上一节对shuffle原理的分析可以发现Spark目前使用的SortShuffle本来就会对partition中的数据排序。所以buildIter经过shuffle之后是排序完成的，直接使用二分查找就可以迅速找到buildIter中的记录。在shuffle read阶段，分别对streamIter和buildIter进行merge sort，在遍历streamIter中的记录时，对于每一条记录都采用二分查找从buildIter中查找对应的记录，由于两个表都是排序的，每次处理完streamIter的一条记录后，对于streamIter的下一条记录，只需要从buildIter中上一次查找结束的位置开始顺序查找，所以不需要每次都在buildIter中进行二分查找，假设streamIter记录数为M，buildIter记录数为N。那么sort merge join的时间复杂度实际为$O(M+N)$，性能是非常好的。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-sort-join.png}
     \caption{sort Join实现原理}
@@ -252,7 +248,7 @@ Sort Merge Join实现原理如图\ref{fig:sort-join}所示，join操作要将两
 Broadcast Join使用了全新的思路，具体过程如图\ref{fig:broadcast-join}所示。为了能将具有相同key的记录分配到同一个分区之中，一般需要使用shuffle实现，但是在buildIter是非常小的表的场景下，那么就没有必要通过shuffle操作实现，因为shuffle的计算代价是非常大的。在buildIter非常小的情况下，可以直接将buildIter广播到每个计算节点，然后将buildIter放在hash表中。通常这种join被称为map join。当buildIter的估计大小不超过参数$spark.sql.autoBroadcastJoinThreshold$设定的值（默认为10MB）,就会自动采用broadcast join。
 
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-broadcast-join.png}
     \caption{Broadcast Join实现原理}
@@ -270,7 +266,7 @@ hash join是林外一种实现方式，具体过程如图\ref{fig:hash-join}所�
 
 可见使用hash join的条件非常苛刻，在大多数实际场景下，hash join和sort merge join的性能也不会有太大的区别，因为hash join也需要shuffle操作。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-hash-join.png}
     \caption{hash Join实现原理}
@@ -281,7 +277,7 @@ hash join是林外一种实现方式，具体过程如图\ref{fig:hash-join}所�
 
 inner join原理如图\ref{fig:inner-join}，inner join需要找到左右表中满足join条件的记录，在buildIter查找记录时，如果右表不存在满足join条件的记录就跳过。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-inner-join.png}
     \caption{inner Join实现原理}
@@ -290,7 +286,7 @@ inner join原理如图\ref{fig:inner-join}，inner join需要找到左右表中�
 
 left outer join的原理如图\ref{fig:leftoute-join}所示。left outer join以左表为准，根据join条件得到keyA，根据join条件在右表中查找满足匹配条件的记录，如果查找失败，则返回一个所有字段都为null的记录。如果查找成功就和左表组成一个新的记录。最后通过join的过滤条件过滤得到最后的结果。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-leftouter-join.png}
     \caption{left outer Join实现原理}
@@ -299,7 +295,7 @@ left outer join的原理如图\ref{fig:leftoute-join}所示。left outer join以
 
 right outer join的原理如图\ref{fig:rightouter-join}所示。right outer join以右表为准，对于右表中的每一行记录，根据join条件计算得到keyB，然后根据keyB去坐标中查找条件相同的记录，如果查找失败会得到一个全为null的记录，如果查找成功就会和右表形成完整的记录。最终根据join的过滤条件得到最终的结果。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-rightouter-join.png}
     \caption{right outer Join实现原理}
@@ -309,7 +305,7 @@ right outer join的原理如图\ref{fig:rightouter-join}所示。right outer joi
 
 full outer join的原理如图\ref{fig:fullouter-join}所示，full outer join相对来说要更复杂一点，底层采用sort merge join实现。因为两个表已经排序，首先分别顺序从左表和右表中取出一条记录，比较key，如果key相同，则将rowA和rowB合并在一起，并且取出两表的下一条记录作为新的rowA和rowB。如果keyA<keyB，则说明右表中没有与左表rowA对应的记录，那么rowA指向下一条记录。如果keyA>keyB，说明左表中中没有与右表rowB对应的记录，那么rowB更新到右表的下一条记录，重复这个过程知道左右两张表的记录全部处理完成。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-fullouter-join.png}
     \caption{full outer Join实现原理}
@@ -318,7 +314,7 @@ full outer join的原理如图\ref{fig:fullouter-join}所示，full outer join�
 
 left semi join的原理如图\ref{fig:semi-join}所示。left semi join以左表为准，在右表中查找匹配的记录，如果查找成功就返回左边的记录。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-semi-join.png}
     \caption{semi Join实现原理}
@@ -327,7 +323,7 @@ left semi join的原理如图\ref{fig:semi-join}所示。left semi join以左表
 
 left anti join的原理如图\ref{fig:anti-join}所示，以左表为准，在右表中查找匹配的记录，如果查找成功，就返回左边的记录。
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-sql-anti-join.png}
     \caption{anti Join实现原理}
@@ -359,7 +355,7 @@ object WordCount {
 }
 \end{lstlisting}
 
-\begin{figure}
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=1\textwidth]{Img/spark-wordcount.png}
     \caption{wordCount程序DAG图}
