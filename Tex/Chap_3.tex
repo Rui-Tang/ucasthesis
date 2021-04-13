@@ -62,40 +62,68 @@ SparkContext对象创建之后会初始化各个组件，初始化完成之后�
     \label{fig:auto-cache}
 \end{figure}
 
-RDD使用频率的算法如\ref{alg:mergesort}所示
-
 \begin{algorithm}  
-    \caption{用归并排序求逆序数}  
+    \caption{根据DAG图计算RDD使用频率}  
     \begin{algorithmic}[1] %每行显示行号  
-        \Require $Array$数组，$n$数组大小  
-        \Ensure 逆序数  
-        \Function{Merger}{$Array, left, middle, right$}  
-            \State $i\gets left$  
-            \State $j\gets middle$  
-            \State $k\gets 0$  
-            \State $result \gets 0$  
-            \While{$i<middle$ \textbf{and} $j<right$}  
-                \If{$Array[i]<Array[j]$}  
-                    \State $B[k++]\gets Array[i++]$  
-                \Else  
-                    \State $B[k++] \gets Array[j++]$  
-                    \State $result \gets result + (middle - i)$  
-                \EndIf  
-            \EndWhile  
-            \While{$i<middle$}  
-                \State $B[k++] \gets Array[i++]$  
-            \EndWhile  
-            \While{$j<right$}  
-                \State $B[k++] \gets Array[j++]$  
-            \EndWhile  
-            \For{$i = 0 \to k-1$}  
-                \State $Array[left + i] \gets B[i]$  
-            \EndFor  
-            \State \Return{$result$}  
+        \Require DAG图根节点
+        \Ensure 所有RDD使用频率
+        \Function{CALCULATE\_FREQUENCY}{$RDD \ root, HashMap \ frequency$}  
+            \State $id \gets root.getId()$
+            \State $parent \gets root.getDependencies()$
+            \For{$preRdd \in parent$}
+                \State $preId \gets preRdd.getId()$
+                \State $frequency[preId] \ frequency[preId] + 1$
+                \State \Call{$CALCULATE\_FREQUENCY$}{$preRdd, \ frequency$}
+            \EndFor
         \EndFunction  
     \end{algorithmic}
-    \label{fig:mergesort}
+    \label{alg:cal-fre}
 \end{algorithm}
+
+\begin{algorithm}  
+    \caption{清空缓存数据}  
+    \begin{algorithmic}[1] %每行显示行号  
+        \Require DAG图根节点
+        \Function{CLEAN\_CACHE}{$RDD \ root$}  
+            \State $root.unpersist()$
+            \State $parent \gets root.getDependencies()$
+            \For{$preRdd \in parent$}
+                \State \Call{$CLEAN\_CACHE$}{$preRdd$}
+            \EndFor
+        \EndFunction
+    \end{algorithmic}
+    \label{alg:clean-cache}
+\end{algorithm}
+
+
+\begin{algorithm}  
+    \caption{设置缓存标记}  
+    \begin{algorithmic}[1] %每行显示行号  
+        \Require DAG图根节点
+        \Function{SET\_CACHE\_FLAG}{$RDD \ root, HashMap \ frequency$}
+            \State $id \gets root.getId()$
+            \State $rddFre \gets frequency[id]$
+            \If{rddFre \ge 2}
+                \State $root.STORAGE\_LEVEL \gets MEMORY\_ONLY$
+            \EndIf
+            \State $parent \gets root.getDependencies()$
+            \For{$preRdd \in parent$}
+                \State \Call{$SET\_CACHE\_FLAG$}{$preRdd, \ frequency$}
+            \EndFor
+        \EndFunction
+    \end{algorithmic}
+    \label{alg:set-cache}
+\end{algorithm}
+
+通过图\ref{fig:auto-cache}所示的流程，可以在第一次小规模计算结束之后得到整个DAG图的结构。然后通过算法\ref{alg:cal-fre}计算所有RDD节点的使用频率。得到频率之后便利整个DAG图，先调用unpersist接口清空小数据的缓存，再根据计算的到的频率设置各个RDD的STORAGE\_LEVEL之后修改输入节点的数据，替换为大规模数据，这样做有一下优点：
+
+\begin{enumerate}
+    \item 避免重复创建SparkContext对象，节约额外开销。在分析了自动缓存模块的实现原理之后可以发现因为需要通过运行整个应用获得DAG图，所以无法避免会带来一些额外开销。通过直接修改输入节点数据，就可以避免重复创建SparkContext对象，从而极大地减少了额外开销。
+    \item 利用容错原理简化实现过程。通过流程图\ref{fig:auto-cache}可以设置rdd的缓存标记。设置完成之后只需要通过submitJob接口重新提交DAG图最后一个job即可。因为小规模数据缓存已经全部被清空，并且输入数据已经被替换，所以框架会根据基于血缘的容错原理从头开始执行整个DAG图。
+\end{enumerate}
+
+在第二次执行过程中，DAGScheduler会将job分为多个stage执行，在一个stage执行结束之后，会优化下一个stage的执行计划，此时根据调整自动缓存模块同步修改DAG图结构。实际上，目前自动执行框架只会做比较细粒度的执行计划，对DAG图整体结构并不会做出太大爱的调整。
+
 \section{自动缓存管理模块测试与性能分析}
 \section{本章总结}
 

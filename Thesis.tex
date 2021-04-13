@@ -21,7 +21,7 @@
 %---------------------------------------------------------------------------%
 %->> Document settings
 %---------------------------------------------------------------------------%
-\usepackage[super,list]{Style/artratex}% document settings
+\usepackage[authoryear,list]{Style/artratex}% document settings
 %- usage: \usepackage[option1,option2,...,optionN]{artratex}
 %- Multiple optional arguments:
 %- [bibtex|biber]% set bibliography processor and package
@@ -40,20 +40,6 @@
 %- [list]% provide enhanced list environments for algorithm and coding
 %- [math]% enable some extra math packages
 %- [xlink]% disable link colors
-
-\usepackage{graphicx}
-
-\usepackage[top=2cm, bottom=2cm, left=2cm, right=2cm]{geometry}  
-\usepackage{algorithm}  
-\usepackage{algorithmicx}  
-\usepackage{algpseudocode}  
-\usepackage{amsmath}  
-  
-\floatname{algorithm}{算法}  
-\renewcommand{\algorithmicrequire}{\textbf{输入:}}  
-\renewcommand{\algorithmicensure}{\textbf{输出:}}  
-
-
 \usepackage{Style/artracom}% user defined commands
 %---------------------------------------------------------------------------%
 %->> Document inclusion
@@ -98,11 +84,7 @@
 %-
 \backmatter% initialize the environment
 \intotoc*{\cleardoublepage}{\bibname}% add link to toc
-\artxifstreq{\artxbib}{bibtex}{% enable bibtex
-    \bibliography{Biblio/ref}% bibliography
-}{%
-    \printbibliography% bibliography
-}
+\bibliography{Biblio/ref}% bibliography
 \input{Tex/Backmatter}% other information
 \end{document}
 %---------------------------------------------------------------------------%
