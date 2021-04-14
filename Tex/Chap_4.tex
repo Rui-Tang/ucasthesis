@@ -88,5 +88,40 @@ Spark应用程序会组成一个DAG计算图。DAG图中的节点为RDD数据，
 
 其中a，b，c分别对应RDD重复使用次数，RDD重复计算开销，RDD大小的权重系数。应该都是大于等于0的，具体数值可以根据使用场景调整。其中重复使用次数和重复计算开销比较大的RDD数据应该优先缓存，数据规模比较大的RDD数据在同等条件下则应该替换清除，以提高内存使用效率。
 
-\section{测试结果分析}
+\section{测试与分析}
+
+本章通过四组样例测试了上述缓存替换策略的效果，每组测试分为四个case，从2GB数据到16GB数据。测试结果如图\ref{cache-time}所示。测试了不同缓存策略作业执行时间。通过实验结果可以发现，在小数据场景下LRU策略会快一点，这应该是因为LRU实现简单，并且小规模数据内存空间充足，导致缓存替换策略起不到作用。在大规模数据集上，本章所述的缓存替换策略会体现出微弱的优势。但是对于迭代时计算没有效果，这是因为LRU策略是非常适合迭代式计算的。
+
+\begin{figure}[!htbp]
+    \centering
+    \begin{subfigure}[b]{0.45\linewidth}
+      \includegraphics[width=\textwidth]{Img/lr-cache.jpg}
+      \caption{逻辑回归测试}
+      \label{fig:lr-cache}
+    \end{subfigure}%
+    ~% add desired spacing
+    \begin{subfigure}[b]{0.45\linewidth}
+      \includegraphics[width=\textwidth]{Img/hive-cache.jpg}
+      \caption{HIVE SQL测试}
+      \label{fig:hive-cache}
+    \end{subfigure}
+    \\% line break
+    \begin{subfigure}[b]{0.45\linewidth}
+      \includegraphics[width=\textwidth]{Img/pagerank-cache.jpg}
+      \caption{PageRank测试}
+      \label{fig:pagerank-cache}
+    \end{subfigure}%
+    ~% add desired spacing
+    \begin{subfigure}[b]{0.45\linewidth}
+      \includegraphics[width=\textwidth]{Img/matrix-cache.jpg}
+      \caption{矩阵分解测试}
+      \label{fig:matrix-cache}
+    \end{subfigure}
+    \caption{不同缓存策略执行时间测试}
+    \label{fig:cache-time}
+\end{figure}
+
+
 \section{本章总结}
+
+本章首先介绍了Spark使用的LRU缓存替换策略，然后分析了这种策略存在的问题。之后设计实现了基于作业运行时信息和拓扑结构的缓存优先级计算方法。最后通过实验分析了这种缓存替换策略的效果，对于小规模作业，LRU策略会更快一点，这是因为小数据集用不完缓存空间，所以缓存替换策略也体现不出效果。对于大规模数据集的SQL作业，有微小的提升效果。对于迭代时计算作业没有效果，这是因为LRU策略非常适合迭代式作业。
