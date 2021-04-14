@@ -86,7 +86,11 @@
 %-
 \backmatter% initialize the environment
 \intotoc*{\cleardoublepage}{\bibname}% add link to toc
-\bibliography{Biblio/ref}% bibliography
+\artxifstreq{\artxbib}{bibtex}{% enable bibtex
+    \bibliography{Biblio/ref}% bibliography
+}{%
+    \printbibliography% bibliography
+}
 \input{Tex/Backmatter}% other information
 \end{document}
 %---------------------------------------------------------------------------%
