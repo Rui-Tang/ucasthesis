@@ -124,7 +124,146 @@ SparkContext对象创建之后会初始化各个组件，初始化完成之后�
 
 在第二次执行过程中，DAGScheduler会将job分为多个stage执行，在一个stage执行结束之后，会优化下一个stage的执行计划，此时根据调整自动缓存模块同步修改DAG图结构。实际上，目前自动执行框架只会做比较细粒度的执行计划，对DAG图整体结构并不会做出太大爱的调整。
 
-\section{自动缓存管理模块测试与性能分析}
+\section{测试与性能分析}
+
+为了测试自动缓存模块的效果，本文修改了Spark3.0的代码，实现了上述自动缓存模块的功能。然后通过SparkBench测试，下文也是使用SparkBench测试，本章简单的介绍以下SparkBench的功能和使用。
+
+\subsection{SparkBench介绍}
+
+SparkBench是Spark系统的基准性能测试项目，由IBM Watson研究中心的五名研究者发起，最后贡献给开源社区。SparkBench的测试项目覆盖了Spark最常见的四种应用：SQL查询、机器学习、图计算和流式计算。每种应用类型都选取了最常见的几个算法进行测试。SparkBench框架的测试结果包含系统资源消耗，计算时间，网络磁盘IO。所以可以比较全面地分析Spark系统的特点。官网也提供了论文。SparkBench支持表\ref{tab:workload}所示的负载。
+
+\begin{table}
+ \caption{SparkBenck支持的负载}
+ \label{tab:workload}
+ \begin{tabular}{lcl}
+  \toprule
+  应用类型 & 测试负载 \\
+  \midrule
+  机器学习 & 逻辑回归、支持向量机，矩阵分解  \\
+  图计算 &  PageRank，SVD++，三角计数（Triangle Count） \\
+  SQL查询 & Hive，RDDRelation  \\
+  流式计算 & Twitter Tag ， Page View  \\
+  其他 &  Kmeans，线性回归，决策树，最短路径，标签传播，连通图，强连通图 \\
+  \bottomrule
+ \end{tabular}
+\end{table}
+
+SparkBench测试数据大部分都可以通过自带的数据生成器生成。SparkBench的使用也比较简单，分为以下三步:
+
+\begin{enumerate}
+    \item 修改<workload>/conf/env.sh文件，配置测试配置数据
+    \item 使用<workload>/bin/gen\_data.shs生成测试数据，这个脚本会根据配置的数据生成指定大小的测试数据
+    \item 调用<workload>/bin/run.sh运行测试负载
+\end{enumerate}
+
+测试样例运行完毕之后，测试数据会存放在num目录下面。包含作业运行过程中的资源使用情况，作业执行时间。资源使用情况包含CPU、内存的使用情况，磁盘和网络IO的使用情况。
+
+\section{测试与分析}
+
+本实验在一台PC电脑上实现，通过参数设置Spark为local mode，同时设置Spark为local模式运行。给Spark框架分配了8GB的内存。6个CPU。具体硬件配置与原件版本如表所示。
+
+\begin{table}
+ \caption{测试环境硬件配置与软件版本}
+ \label{tab:setup}
+ \begin{tabular}{lcl}
+  \toprule
+  配置项 & 配置信息 \\
+  \midrule
+  CPU &  2.6GHz 6-core 9th\-generation Intel Core i7 processor \\
+  内存 & 16GB of 2666MHz DDR4 memory  \\
+  磁盘 &  512GB of SSD storage \\
+  Spark版本 & 3.0.0  \\
+  Hadoop版本 &  3.2 \\
+  Scala版本 & 2.11.8  \\
+  JDK版本 &  java\-1.8.0\_231 \\
+  操作系统 & macOS 11 Big Sur  \\
+  开发环境 &  IntelliJ IDEA 11.1.4 \\
+  \bottomrule
+ \end{tabular}
+\end{table}
+
+本文选用了逻辑回归、HIVE、PageRank、矩阵分解四个测试负载，在不同输入数据大小情况下，测试对比了自动缓存模块的效果。首先我对四个测试样例进行了测试，统计了Shuffle数据、Stage数量、Task数量等信息。通过测试可以发现不同的测试负载各有特点。比如对于逻辑回归类型应用，它并不存在shuffle操作，所以shuffle的读写数据都为0。对于HIVE应用，因为HIVE SQL查询最终生成的逻辑执行计划是一样的，又因为stage是根据宽依赖也就是shuffle依赖确定的，所以stage数量是相同的，但是因为数据量变大之后分区数量也随之变大，每一个分区对应一个task，所以随着数据量变大，task数量也会变多。对于PageRank算法，每次迭代后如果和上次的排名没有区别算法就认为已经收敛，然后推出结束了，数据规模比较小时收敛速度比较快，数据量大的情况下收敛速度变慢，迭代的轮数也会变多，导致stage数量也会变多。
+
+\begin{table}
+ \caption{SparkBenck支持的负载}
+ \label{tab:workload}
+ \begin{tabular}{lccccccccccccccccl}
+  \toprule
+  负载名称 & 输入数据大小 & Shuffle 读/写 数据量 & Stage 数量 & Task 数量 \\
+  \midrule
+  逻辑回归 & 2G & 0G/0G & 3 & 431 \\  
+  逻辑回归 & 4G & 0G/0G & 4 & 513 \\  
+  逻辑回归 & 8G & 0G/0G & 5 & 1152 \\  
+  逻辑回归 & 16G & 0G/0G & 7 & 2254 \\  
+  HIVE & 2G & 2.7G/2.8G & 12 & 2927 \\  
+  HIVE & 4G & 4.6G/4.8G & 12 & 6272 \\  
+  HIVE & 8G & 10.3G/11.6G & 12 & 10048 \\  
+  HIVE & 16G & 21.3G/22.7G & 12 & 20174 \\ 
+  PageRank & 2G & 7.4G/9.4G & 6 & 1578 \\  
+  PageRank & 4G & 15.4G/18.6G & 8 & 3481 \\  
+  PageRank & 8G & 27.7G/31.8G & 13 & 5727 \\  
+  PageRank & 16G & 62.3G/67.7G & 21 & 12247 \\
+  矩阵分解 & 2G & 0.7G/0.9G & 9 & 394 \\  
+  矩阵分解 & 4G & 1.2G/1.3G & 20 & 757 \\  
+  矩阵分解 & 8G & 2.8G/3.1G & 43 & 1556 \\  
+  矩阵分解 & 16G & 5.0G/5.4G & 81 & 4302\\  
+  \bottomrule
+ \end{tabular}
+\end{table}
+
+之后我测试了自动缓存模块的效果，测试方法是修改了SparkBench测试负载的代码(在legacy分支)，将代码中的cache调用全都删除，修改后运行添加了自动缓存模块的Spark框架。之后再与未修改的原生Spark框架进行对比。
+
+\begin{figure}[!htbp]
+    \centering
+    \begin{subfigure}[b]{0.45\linewidth}
+      \includegraphics[width=\textwidth]{Img/lr-auto-cache.jpg}
+      \caption{逻辑回归测试}
+      \label{fig:lr-auto-cache}
+    \end{subfigure}%
+    ~% add desired spacing
+    \begin{subfigure}[b]{0.45\linewidth}
+      \includegraphics[width=\textwidth]{Img/hive-auto-cache.jpg}
+      \caption{HIVE SQL测试}
+      \label{fig:hive-auto-cache}
+    \end{subfigure}
+    \\% line break
+    \begin{subfigure}[b]{0.45\linewidth}
+      \includegraphics[width=\textwidth]{Img/pagerank-auto-cache.jpg}
+      \caption{PageRank测试}
+      \label{fig:pagerank-auto-cache}
+    \end{subfigure}%
+    ~% add desired spacing
+    \begin{subfigure}[b]{0.45\linewidth}
+      \includegraphics[width=\textwidth]{Img/matrix-auto-cahe.jpg}
+      \caption{矩阵分解测试}
+      \label{fig:matrix-auto-cache}
+    \end{subfigure}
+    \bicaption{自动缓存测试}
+    \label{fig:auto-cache}
+\end{figure}
+
+
+\begin{figure}[htbp]
+\centering
+\subfigure[pic1.]{
+\includegraphics[width=5.5cm]{Img/lr-ac-2.jpg}
+%\caption{fig1}
+}
+\quad
+\subfigure[pic2.]{
+\includegraphics[width=5.5cm]{Img/hive-ac-2.jpg}
+}
+\quad
+\subfigure[pic3.]{
+\includegraphics[width=5.5cm]{Img/pagerank-ac-2.jpg}
+}
+\quad
+\subfigure[pic4.]{
+\includegraphics[width=5.5cm]{Img/matrix-ac-2.jpg}
+}
+\caption{ pics}
+\end{figure}
+
 \section{本章总结}
 
 
