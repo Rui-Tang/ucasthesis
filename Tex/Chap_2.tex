@@ -4,7 +4,7 @@ Spark是一种基于内存的分布式计算框架。Spark框架分为四层：�
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.99\textwidth]{Img/spark-distribution-framework.png}
+    \includegraphics[width=0.99\textwidth]{Img/Spark部署架构图.png}
     \caption{Spark 分布式架构}
     \label{fig:spark-framework}
 \end{figure}
@@ -90,7 +90,7 @@ TaskSet被封装成TaskSetManager，TaskScheduler通过树形结构管理TaskSet
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.99\textwidth]{Img/spark-scheduler-fifo-tree.png}
+    \includegraphics[width=0.99\textwidth]{Img/FIFIO底层策略.png}
     \caption{FIFO调度策略底层树结构}
     \label{fig:scheduler-fifo-tree}
 \end{figure}
@@ -99,7 +99,7 @@ FAIR调度策略用于保证多个作业的公平调度。比如有两个job，�
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.99\textwidth]{Img/scheduler-fair-tree.png}
+    \includegraphics[width=0.99\textwidth]{Img/FAIR底层逻辑.png}
     \caption{FAIR调度策略底层树结构}
     \label{fig:scheduler-fair-tree}
 \end{figure}
@@ -127,7 +127,7 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=1\textwidth]{Img/rdd-readonly.png}
+    \includegraphics[width=1\textwidth]{Img/RDD示意图.png}
     \caption{只读弹性分布式数据集RDD}
     \label{fig:rdd}
 \end{figure}
@@ -284,7 +284,7 @@ inner join原理如图\ref{fig:inner-join}，inner join需要找到左右表中�
     \label{fig:inner-join}
 \end{figure}
 
-left outer join的原理如图\ref{fig:leftoute-join}所示。left outer join以左表为准，根据join条件得到keyA，根据join条件在右表中查找满足匹配条件的记录，如果查找失败，则返回一个所有字段都为null的记录。如果查找成功就和左表组成一个新的记录。最后通过join的过滤条件过滤得到最后的结果。
+left outer join的原理如图\ref{fig:leftouter-join}所示。left outer join以左表为准，根据join条件得到keyA，根据join条件在右表中查找满足匹配条件的记录，如果查找失败，则返回一个所有字段都为null的记录。如果查找成功就和左表组成一个新的记录。最后通过join的过滤条件过滤得到最后的结果。
 
 \begin{figure}[htbp]
     \centering

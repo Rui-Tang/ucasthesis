@@ -16,7 +16,7 @@ Spark应用在执行过程中会将应用程序解析成DAG图，然后根据DAG
 \begin{enumerate}
     \item shuffle partition 个数，比如spark的shuffle partition个数默认值为200。可以通过参数配置，这个参数决定了reduce阶段任务的数量，对整个查询的性能有很大的影响。假设一个查询运行前申请E个Executor，每个Executor包含C个core（并发执行线程数），那么该作业在运行时可以并行执行的作业个数就为$E\times C$个，也可以说该作业的并发数为$E\times C$个。假设shuffle partition个数为P，处理map stage的任务数和原始数据的文件数量和大小有关，后续的每个reduce stage的任务数量都为P。由于Spark作业调度是抢占式的，$E\times C$个作业会抢占执行P个任务，直至所有任务完成，就会进入下一个stage。在这个过程中，任务执行时间会过长，导致整个stage执行时间变长，另一方面，$E\times C$个执行单元大部分都处于空闲状态，导致整体资源利用率急剧下降。所以shuffle partition个数的设置就对性能有着很大的影响，在实际运行场景下，作业执行之前很难设置shuffle partion个数。
     \item 最佳执行计划，Spark SQL会将应用程序翻译成逻辑计划，然后经历一系列的优化，最后确定一个物理执行计划。最终选择的物理执行计划对性能有很大的影响。如果选择最佳的执行计划是Spark SQL的Catalyst优化器的核心工作。Catalyst早期主要是基于规则的优化器（RBO，Rule Based Optimizer），在Spark2.2中加入了基于代价的优化（CBO, Cost Based Optimizer）。也有一些工作实现了根据历史记录的优化（HBO，History Based Optimizer）。这些优化器统一的特点是在作业执行之前完全确定物理执行计划，一旦确定之后就不再改变。然而实际作业往往在事先无法完全预料。如图\ref{fig:wrong-sort-join}所示。其中一张表的大小仅为600KB，然后Spark申城的物理执行计划依旧使用了sortMergeJoin。这种场景明显使用BroadcastJoin更加合理。
-    \item 数据倾斜问题。数据倾斜是常见的导致SparkSQL性能变差的问题。数据倾斜是指某一个partition的数据量远远大于其他partition的数据。导致个别任务的运行时间远远大于其他任务，因此拖累了整个作业的运行时间。在实际作业中，数据倾斜问题很常见，这是因为join key对应的hash值分布不均匀。在极端情况下，hash结果分布非常不均匀，导致大量数据被分到同一个partition二导致严重数据倾斜。如图\ref{fig:data-qinxie}所示，大部分任务在两秒内就完成了，但是最慢的任务却花了4分钟，这就是因为发生了数据倾斜问题，他处理的数据是其他任务的数倍。最终虽然大部分很快就运行结束，因为数据倾斜问题，整个作业的执行时间也被极大地影响了。
+    \item 数据倾斜问题。数据倾斜是常见的导致SparkSQL性能变差的问题。数据倾斜是指某一个partition的数据量远远大于其他partition的数据。导致个别任务的运行时间远远大于其他任务，因此拖累了整个作业的运行时间。在实际作业中，数据倾斜问题很常见，这是因为join key对应的hash值分布不均匀。在极端情况下，hash结果分布非常不均匀，导致大量数据被分到同一个partition二导致严重数据倾斜。如图\ref{tab:data-qinxie}所示，大部分任务在两秒内就完成了，但是最慢的任务却花了4分钟，这就是因为发生了数据倾斜问题，他处理的数据是其他任务的数倍。最终虽然大部分很快就运行结束，因为数据倾斜问题，整个作业的执行时间也被极大地影响了。
 
 \end{enumerate}
 
@@ -27,13 +27,32 @@ Spark应用在执行过程中会将应用程序解析成DAG图，然后根据DAG
     \label{fig:wrong-sort-join}
 \end{figure}
 
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=0.99\textwidth]{Img/data-qingxie .png}
-    \caption{数据倾斜问题}
-    \label{fig:data-qinxie}
-\end{figure}
 
+\begin{table}
+ \centering
+ \small
+ \caption{SparkBenck支持的负载}
+ \label{tab:data-qinxie}
+ \resizebox{\columnwidth}{!}{%
+ \begin{tabular}{lccccccccl}
+  \toprule
+  Metric & Min & 25th percentile & Median & 75th percentile & Max \\
+  \midrule
+  Duration & 15ms & 2s  & 3s  & 5s & 4min \\
+  Scheduler Delay & 0ms & 2ms & 2ms & 3ms & 1s \\
+  Task Deserialization Time & 3ms & 5ms & 6ms & 7ms & 0.4s \\
+  GC Time & 0ms & 0ms & 0.2s & 0.3s & 35s \\
+  Result Serialization Time & 0ms & 0ms & 0ms & 0ms & 3ms \\
+  Getting Result Time & 0ms & 0ms & 0ms & 0ms & 0ms \\
+  Peak Execution Memory & 0B & 0B & 0B & 0B & 0B \\
+  Shuffle Read Blocked Time & 0ms & 44ms & 0.2s & 0.6s & 31s \\
+  Shuffle Read Size/Records & 0B/0 & 3.5MB/374415 & 4.0MB/747052 & 6.9MB/1783859 & 172.8MB/283732661 \\
+  Shuffle Write Size/Records & 0B/0 & 109B/3 & 132B/4 & 158B/6 & 262B/13 \\
+  Shuffle spill(memory) & 0B & 0B & 0B & 0B & 13.3GB \\
+  Shuffle Write(disk) & 0B & 0B & 0B & 0B & 68.2MB \\
+  \bottomrule
+ \end{tabular}}
+\end{table}
 
 对于这些问题，Spark设计实现了一套自适应执行框架。自适应执行框架的思路是在执行计划中划分好stage，然后按照stage提交执行，在运行过程中收集当前stage的统计信息，通过运行时信息来优化下一个stage的物理执行计划，然后提交后续的stage。在运行过程中，Spark动态执行框架会根据运行情况动态设置下游Reducer个数、动态调整执行计划、动态处理数据倾斜问题。
 
@@ -219,25 +238,25 @@ SparkBench测试数据大部分都可以通过自带的数据生成器生成。S
 \begin{figure}[!htbp]
     \centering
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/lr-auto-cache.jpg}
+      \includegraphics[width=\textwidth]{Img/LR-cache.png}
       \caption{逻辑回归测试}
       \label{fig:lr-auto-cache}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/hive-auto-cache.jpg}
+      \includegraphics[width=\textwidth]{Img/HIVE-cache.png}
       \caption{HIVE SQL测试}
       \label{fig:hive-auto-cache}
     \end{subfigure}
     \\% line break
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/pagerank-auto-cache.jpg}
+      \includegraphics[width=\textwidth]{Img/PAGERANK-cache.png}
       \caption{PageRank测试}
       \label{fig:pagerank-auto-cache}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/matrix-auto-cahe.jpg}
+      \includegraphics[width=\textwidth]{Img/MATRIX-cache.png}
       \caption{矩阵分解测试}
       \label{fig:matrix-auto-cache}
     \end{subfigure}
@@ -245,12 +264,12 @@ SparkBench测试数据大部分都可以通过自带的数据生成器生成。S
     \label{fig:auto-cache}
 \end{figure}
 
-从图\ref{autocache-2}可以看到，对于逻辑回归、PageRank和矩阵分解来说，额外开销会随着数据规模变大而变大，这与自动缓存和算法实现原理有关。因为这三种算法随着数据规模变大，迭代次数也会变多，所以第一次执行也需要迭代很多次才能得到DAG图结构，就会造成比较大的延迟。而对于HIVE SQL作业来说，随着数据规模变大额外开销并不会随之变化太多。这是因为对于SQL查询作业来说，在SQL转化得到的逻辑执行计划并不会随着输入数据变化，所以不同数据规模的自动缓存模块执行的逻辑执行计划都是一样的，就不会有太大的差别。
+从图\ref{fig:autocache-2}可以看到，对于逻辑回归、PageRank和矩阵分解来说，额外开销会随着数据规模变大而变大，这与自动缓存和算法实现原理有关。因为这三种算法随着数据规模变大，迭代次数也会变多，所以第一次执行也需要迭代很多次才能得到DAG图结构，就会造成比较大的延迟。而对于HIVE SQL作业来说，随着数据规模变大额外开销并不会随之变化太多。这是因为对于SQL查询作业来说，在SQL转化得到的逻辑执行计划并不会随着输入数据变化，所以不同数据规模的自动缓存模块执行的逻辑执行计划都是一样的，就不会有太大的差别。
 
 \begin{figure}[!htbp]
     \centering
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/lr-ac-2.jpg}
+      \includegraphics[width=\textwidth]{Img/lr-cache.jpg}
       \caption{逻辑回归测试}
       \label{fig:lr-ac-2}
     \end{subfigure}%
