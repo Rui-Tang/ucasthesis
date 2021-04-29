@@ -26,7 +26,7 @@
 \begin{enumerate}
     \item 设计实现自动缓存系统。为了解决手动指定缓存可能导致的错误缓存、操作复杂的问题，该模块通过提前运行小规模数据集得到重复使用的RDD数据，之后再执行大规模数据集时自动缓存重复使用的RDD数据。此外考虑了新版本Spark中添加的动态执行特性。Spark框架在运行过程中修改执行计划时自动管理模块也会实时修改DAG图信息，本文也会相对应的做出调整，保证能够做出正确的缓存决策。通过这种方式实现了自动缓存的功能。经过测试，对于迭代式计算和SQL作业，自动缓存模块平均额外计算开销占作业总执行时间的12\%和3\%。
     \item 设计实现基于DAG拓扑结构的缓存替换策略。为了优化缓存替换策略，从而加速作业执行速度，该策略综合考虑了RDD的大小、计算代价以及DAG图拓扑结构等特征。综合计算得到RDD数据的优先级，发生缓存替换时淘汰优先级最低的RDD数据。经过测试，对于大规模测试样例，作业平均执行时间减少了23s。
-    \item 设计实现了容错新增强的冗余缓存清理模块。为了解决缓存占用率高以及出错情况下作业容错性差的问题，该模块通过对DAG图的分析，在计算过程中自动删除部分冗余的缓存对象，提高内存空间利用率。通过保留距离当前正在计算的RDD数据为2的数据，增加了系统的容错性，从而可以兼顾系统的内存利用率和容错性。经过测试，作业执行过程中的缓存占用率平均降低了19.5\%。在容错性测试样例，作业能够迅速恢复计算，整体作业执行时间缩短了27\%。
+    \item 设计实现了容错新增强的冗余缓存清理模块。为了解决缓存占用率高以及出错情况下作业容错性差的问题，该模块通过对DAG图的分析，在计算过程中自动删除部分冗余的缓存对象，提高内存空间利用率。通过保留距离当前正在计算的RDD数据为2的数据，增加了系统的容错性，从而可以兼顾系统的内存利用率和容错性。经过测试，作业执行过程中的缓存占用率平均降低了19.5\%。
 \end{enumerate}
 
 \keywords{分布式计算，Spark框架，缓存管理，缓存策略}% 中文关键词
@@ -41,8 +41,7 @@ The cache management module and the DAG engine composed of RDDs are the core opt
 
 In order to solve the above three problems. This paper studies the principle and operating mechanism of the Spark framework analyzed in detail, and designs and implements an automatic cache management module based on the principle of Spark, a cache replacement strategy based on the DAG topology, and a newly enhanced redundant cache cleaning module for fault tolerance.Thus, a set of solutions are proposed for the problems existing in the Spark cache management system. The main work of this paper is as follows:
 
-\begin{enumerate}
-    \item This paper studies and analyzes the design principles and operating mechanisms, resource management methods, and job scheduling operating modes of the distributed memory computing system Spark. This article tests and analyzes the characteristics and problems of Spark's memory management mechanism.This article uses big data benchmark to test the usage characteristics of Execution Memory, Shuffle Memory, and Storage Memory memory partitions in the Spark framework
+\begin{enumerat}
     \item This article designs and implements an automatic caching system. This article runs a small-scale data set in advance to get the reused RDD data, and then automatically caches the reused RDD data when executing a large-scale data set. This article also considers the dynamic execution features added in the new version of Spark. When the Spark framework modifies the execution plan during the running process, the automatic management module will also modify the DAG graph information in real time. This article ensures that the correct caching decision can be made.
     \item This article designs and implements a cache replacement strategy based on DAG topology. This strategy comprehensively considers the characteristics of RDD size, computational cost, and DAG graph topology structure. The priority of RDD data is obtained by comprehensive calculation, and the RDD data with the lowest priority is eliminated when cache replacement occurs.
     \item This paper designs and implements a new and enhanced redundant cache cleaning module for fault tolerance. Through the analysis of the DAG graph, this article automatically deletes some redundant cache objects during the calculation process to improve the utilization of memory space.This paper increases the fault tolerance of the system by retaining the data whose distance is 2 from the RDD data currently being calculated, so that the memory utilization and fault tolerance of the system can be taken into account.

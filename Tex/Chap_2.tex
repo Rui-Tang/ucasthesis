@@ -67,7 +67,6 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
 
 任务调度可以分为stage级别调度和task级别调度。stage级别调度会先对DAG图进行分割。划分过程是从job的最后一个RDD开始向上回溯遍历，遇到宽依赖，也就是需要Shuffle的依赖就将RDD加入新的Stage之中。如果是窄依赖就将RDD加入当前Stage之中。这样就可以根据依赖关系将一个job切分成许多个Stage。
 
-
 切分成多个Stage后会根据拓扑排序的关系从前到后执行。当一个Stage的父Stage全都执行完成之后当前Stage就会被调度执行。DAGScheduler会将Stage中Task信息，包括分区信息和操作方法等序列化打包成TaskSet交给TaskScheduler，每个分区Partition都对应一个Task。提交TaskSet之后DAGScheduler会监控Stage执行状况。
 
 \begin{figure}[htbp]
