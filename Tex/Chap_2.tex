@@ -262,7 +262,6 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
  \small
  \caption{transformation算子}
  \label{tab:transformation}
- \resizebox{\columnwidth}{!}{%
  \begin{tabular}{lccccccccl}
   \toprule
   算子名称 & 算子操作 \\
@@ -281,7 +280,7 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
   $sort(c:Comparator[K])$ & $RDD[K,V] \Rightarrow RDD[K,V]$ \\
   $partitionBy(p : Partitioner[K])$ & $RDD[K,V] \Rightarrow RDD[K,V]$ \\
   \bottomrule
- \end{tabular}}
+ \end{tabular}
 \end{table}
 
 \begin{table}
@@ -289,7 +288,6 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
  \small
  \caption{action算子}
  \label{tab:action}
- \resizebox{\columnwidth}{!}{%
  \begin{tabular}{lccccccccl}
   \toprule
   算子名称 & 算子操作 \\
@@ -300,19 +298,13 @@ Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小
   $lookup(k, K)$ & $RDD[K,V] \Rightarrow Seq[V]$\\
   $save(path:String)$ & 将RDD数据存储到存储系统\\
   \bottomrule
- \end{tabular}}
+ \end{tabular}
 \end{table}
 
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/rdd-transformations-actions.png}
-    \caption{transformation和action算子}
-    \label{fig:rdd-transformation-action}
-\end{figure}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=1\textwidth]{Img/rdd-dependency.png}
+    \includegraphics[width=1\textwidth]{Img/宽窄依赖.png}
     \caption{宽依赖与窄依赖}
     \label{fig:rdd-dependency}
 \end{figure}
