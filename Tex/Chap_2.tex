@@ -1,4 +1,7 @@
 \chapter{分布式计算框架Spark实现机制概述}\label{chap:basic}
+
+本章对Spark实现机制进行了详细的分析，尤其针对作业调度执行过程和缓存管理机制进行了深入的分析。
+
 \section{Spark系统实现概述概述}
 Spark是一种基于内存的分布式计算框架。Spark框架分为四层：用户层、作业管理执行层、资源任务调度层、物理执行层。在用户层，用户需要使用框架api编写应用代码，准备输入数据，配置应用参数。用户将这些信息提交给作业管理执行层后，框架会将用户应用转化为具体的作业执行计划，分为逻辑处理计划（数据单元和数据处理依赖关系）和物理执行计划（具体执行计划和阶段）。生成了具体的执行计划之后，框架的资源任务调度层会向集群资源管理器申请资源，资源申请成功后，框架把具体任务和资源绑定，并发送作业执行计划给物理执行层。物理执行层收到作业执行计划之后，会根据作业的配置信息下载应用代码，运行任务并将执行结果反馈给框架。下面会对Spark框架的四层进行进一步的介绍。
 
@@ -46,6 +49,7 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
 
 \section{作业执行调度模块}
 
+\subsection{作业调度总体架构}
 调度模块主要有这几部分：ResourceManager，DAGScheduler，TaskScheduler，SchedulerBackend。其中ResourceManger用于向资源调度器，如Yarn，Mesos，Kubernetes申请资源。资源申请成功之后会启动一个Executor进程。Executor进程启动之后会向Driver进程反向注册，注册成功之后也会持续发送心跳包，同时等待Driver下发任务。收到任务后Executor会执行并上报任务执行状态。这就是资源调度的基本过程。
 
 在任务调度方面，用户的应用程序会根据RDD之间的转化关系转化成一个DAG图，之后框架会将DAG分成多个job，每个job会分成多个stage，stage中的任务会组成taskSet发送给Executor执行，这里详细解释一下这几个概念。
@@ -65,6 +69,7 @@ Task，Spark计算任务。Driver程序启动后会将Spark应用切分成多个
     \label{fig:application-schedule-process}
 \end{figure}
 
+\subsection{调度详细过程}
 任务调度可以分为stage级别调度和task级别调度。stage级别调度会先对DAG图进行分割。划分过程是从job的最后一个RDD开始向上回溯遍历，遇到宽依赖，也就是需要Shuffle的依赖就将RDD加入新的Stage之中。如果是窄依赖就将RDD加入当前Stage之中。这样就可以根据依赖关系将一个job切分成许多个Stage。
 
 切分成多个Stage后会根据拓扑排序的关系从前到后执行。当一个Stage的父Stage全都执行完成之后当前Stage就会被调度执行。DAGScheduler会将Stage中Task信息，包括分区信息和操作方法等序列化打包成TaskSet交给TaskScheduler，每个分区Partition都对应一个Task。提交TaskSet之后DAGScheduler会监控Stage执行状况。
@@ -104,113 +109,7 @@ FAIR调度策略用于保证多个作业的公平调度。比如有两个job，�
 \end{figure}
 
 
-\section{Spark内存管理模块分析}
-
-Spark是一种基于内存的分布式计算框架，在计算的过程中通过将数据缓存在内存中加速计算过程。所以内存管理模块是Spark系统的核心模块。Spark内存管理机制在JVM虚拟内存管理的基础上对Executor模块拥有的内存进行了进一步的分配管理。也支持在Executor外的系统内存中直接开辟内存空间用于存储计算过程中产生的大量数据。通过使用对外内存，可以减少内存空间不足导致的垃圾回收以及内存不足错误。
-
-Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小由配置参数决定。内存管理模块会将内存分为四个部分。Storage Memory，Execution Memory，User Memory，Reserved Memory。四部分内存有不同的用途。
-
-\begin{enumerate}
-    \item Storage Memory 用于缓存中间数据。比如对于一份数据data1，在之后计算过程中需要重复使用。就可以调用data1.cache接口将数据缓存在Storage Memory区域。在之后计算过程中框架就可以直接从Storage Memory区域读取数据。具体来说，调用cache接口并不会立刻将数据写入缓存之中，而只是设置了STORAGE\_LEVEL这个标记为MEMORY\_ONLY。后续在框架执行的过程中，当data1被计算得到时，框架会检查STORAGE\_LEVEL这个标记，发现为MEMORY\_LEVEL后会通过memory maneger将其存入Storage Memory之中。这个过程并不会造成内存拷贝复制。memory manager只是将指向数据的引用从Execution Memory移到Storage Memory之中，并更新两个内存区域内存总量。
-    
-    \item Execution Memory 用于框架计算过程。在计算过程中比如对于Shuffle操作，需要在内存中缓存一部分数据，再一次性写入文件系统之中，从而避免频繁磁盘IO导致的延迟。在计算的过程中数据也都存放在Executor Memory之中。比如上面所说的data1，在计算过程中一直使用Execution Memory。在计算结束之后根据STORAGE\_LEVEL，如果为MEMORY\_ONLY就会移到Storage Memory之中。
-    
-    \item User Memory 为应用程序使用的内存空间。应用程序创建的各种和Spark框架无关的对象都会存在User Memory之中。
-    
-    \item Reserved Memory 的目的是避免发生OOM（Out of Memory）错误。OOM问题的根本原因是框架的内存管理和底层JVM的内存管理是完全隔离的。框架只是简单的记录内存的使用量，但是记录的内存使用量和实际的内存使用量并不是一一对应的。首先User Memory的内存是框架无法准确感知的。其次Storage Memory区域的内存也是不准确的，比如Storage Memory区域缓存有一份数据data1。之后应用程序调用data1.uncache接口将data1数据从内存中清除。框架所做的工作是在缓存管理模块中将data1的引用释放，并且将data1的内存总量加到Storage Memory的空闲内存之中，表示这些内存空间空闲。但是此时data1实际占用的JVM内存并没有被释放，实际内存的释放完全依赖于JVM虚拟机的垃圾回收机制，如果此时框架有新的内存申请请求，就有很大可能让框架实际使用内存超过向JVM申请的资源，导致OOM错误。所以需要保留一段空闲内存，避免这种OOM的出现。但是这种方法也有一些缺点，首先它并不能完全消除OOM错误，只要多申请的内存超过Reserved Memory的大小，还是会导致出错。另一方面Reserved Memory所占用的内存资源完全被浪费了，造成内存资源利用率下降。
-\end{enumerate}
-
-目前内存管理模块有两种模式，默认模式和Legacy模式。默认模式Storage Memory和Execution Memory是共享内存空间的。Legacy模式下Storage Memory和Execution Memory是隔离的，通过配置文件可以配置两者的大小。
-
-\subsection{弹性分布式数据集RDD}
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/RDD示意图.png}
-    \caption{只读弹性分布式数据集RDD}
-    \label{fig:rdd}
-\end{figure}
-
-弹性分布式数据集（Resilient Distributed Datasets）是Spark框架的核型概念。RDD是指一种可并行可操作的只读数据集合。RDD利用了Scala语言的特性，Scala将数据分为可变数据variable和不可变数据value。RDD中的数据被设置成不可变数据，所以在创建之后就不能再改变了，因为是不可变数据，所以很适合并行处理。RDD数据有丰富的操作，操作也分为两类，transform和action。transform操作是将一个RDD转化为另一个RDD。因为对于用户来说RDD无法直接展示，所以框架也不会立即计算。action操作是计算出一个具体的结果，比如求和，求平均数等操作。因为需要计算具体的结果，所以框架只有遇到action操作才会具体计算。RDD数据之间的操作相当于作业DAG图中的边。RDD相当于DAG图中的点。Spark框架通过DAG图的拓扑来解决容错的问题。比如data1是由data2和data3计算得到的。在DAG图中就有data1指向data2和data3的两条边。在计算data1的过程中框架会沿着这两天边检查data2和data3的状态，如果data2和data3保存在内存之中，框架会直接进行计算，如果保存在磁盘之中，框架会从磁盘中将数据加载到内存之中进行计算。如果数据完全丢失了，框架就会重新计算RDD数据。
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/rdd-transformations-actions.png}
-    \caption{transformation和action算子}
-    \label{fig:rdd-transformation-action}
-\end{figure}
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/rdd-dependency.png}
-    \caption{宽依赖与窄依赖}
-    \label{fig:rdd-dependency}
-\end{figure}
-
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/rdd-dag.png}
-    \caption{stage划分示意图}
-    \label{fig:rdd-dag-stage}
-\end{figure}
-
-RDD之间的关系还可以进一步分类。如果转化操作的逻辑可以转化为窄依赖和宽依赖两种。窄依赖是指父RDD的每个分区只被一个子RDD的分区使用，这种依赖关系下，父子RDD之间数据交换无需进行shuffle操作，父RDD只需将数据发送给子RDD即可。宽依赖是指父RDD的分区数据会被多个子RDD的分区使用，也就是说父RDD输出的数据会被多个子RDD使用，这就需要在父子之间进行Shuffle交换数据，宽窄依赖主要用于作业调度执行。框架在执行过程中遇到一个action操作就会提交一个job，在job调度执行期间，DAGScheduler会把所有宽依赖所在的边切分，将整个DAG计算图切分成多个子图，每个子图称为一个stage，DAGScheduler将stage发送给TaskScheduler调度执行每一个任务。
-
-\subsection{缓存数据管理模块}
-
-缓存存储模块主要包含如下两个部分，RDD缓存和Shuffle数据缓存。缓存模块的主要工作是管理RDD缓存，包括内存和磁盘的缓存。Shuffle中间数据的管理也是有缓存管理模块完成。存储模块中管理着多种不同的数据，包括RDD数据块、Shuffle数据块、广播变量数据块、任务返回数据块、流式数据块。RDD数据块用于标记缓存的RDD数据。Shuffle数据块用于标识缓存的Shuffle数据。广播变量数据块用于标识广播变量。任务返回数据块用于标识任务赶回结果数据。流式数据块在Spark Streaming中用于标记收到的流式数据。
-
-BlockManager模块用于管理各种缓存数据。RDD分区数据，Shuffle数据，broadcast数据都由BlockManager管理。BlockManager是一个主从结构。在Driver节点和Executor节点都有BlockManager，Executor节点的BlockManager会将block数据块的数据都发送给Driver节点的BlockManager统一管理。BlockManager对外提供get和set接口，可以将数据存储在内存、磁盘或者堆外内存。
-
-Driver初始化的时候会创建BlockManager的时候会创建一个BlockManagerMasterEndpoint，之后Driver会将BlockManagerMasterEndpoint发送给Executor节点，Executor节点收到后会创建自己的BlockManager，并且通过BlockManagerMasterEndpoint向Driver节点上报注册信息。
-
-
-BlockManager模块有MemoryStore和DiskStore两个模块用以存储block。DiskStore使用磁盘存储缓存数据，DiskStore中有一个成员DiskStoreManager，它的主要作用是管理逻辑block和物理block之间的映射关系，DiskStore中的block对应文件系统中的一个文件。DiskStore接收到缓存请求的时候会根据规则创建一个文件并将文件写入文件之中。MemoryStore使用Executor的JVM堆内存存储数据。MemoryStore中维护了一个LinkedHashMap来管理所有的block，Scala语言的LinkedHashMap底层通过链表存储数据，会将访问的数据移到链表头部。所以LinkedHashMap是具有LRU的特性的。MemoryStore模块就是巧妙地利用LinkedHashMap实现LRU替换策略的。
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/rdd-cache.png}
-    \caption{数据缓存示意图}
-    \label{fig:rdd-cache}
-\end{figure}
-
-\section{Shuffle原理解析}
-
-在传统Hadoop系统之中Shuffle是连接Map操作和Reduce操作的桥梁，在Spark之中Shuffle操作使用场景更多。Shuffle操作将map的输出对应到reduce的输入中，Shuffle操作涉及到序列化和反序列化、跨节点网络通信IO以及磁盘读写IO等。所以说Shuffle操作是整个应用程序运行过程中非常重要的一个阶段。
-
-Spark的Shuffle实现大致如图\ref{fig:shuffle-overview}所示，对于一个DAG计算图，以Shuffle操作为界，划分stage，上游stage为map阶段，下游stage为reduce阶段。map阶段的每一个任务计算得到一个分区，将分区数据分成多份，每一份发送给下游stage对应的分区，并且将临时结果写入磁盘，这个过程叫做shuffle write；下游stage为reduce task，每个reduce task通过网络拉去上游stage中所有map task的指定分区结果数据，该过程叫做shuffle read，最后完成整个计算过程。这里举一个例子说明，例如上游stage有M个map task，下游stage有N个reduce task，那么上游stage的每个map task都会将输出数据分为N份。下游stage的每个reduce task会从上游拉去M个数据。整个Shuffle过程会产生$M \times N$个临时小文件，每个小文件都要写入磁盘，导致大量碎片写磁盘操作，每个小文件也会通过网络传输给下游节点，造成大量网络传输。
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/spark-shuffle-overview.png}
-    \caption{Hash Shuffle V1原理图}
-    \label{fig:shuffle-overview}
-\end{figure}
-
-为了解决这些问题，Spark进行了一系列的优化，如图\ref{fig:shuffle-v2}为了减少临时小文件的数量，Spark使用将map task输出的小文件合并到同一个文件，这样下游的reduce task只需要一次性从上游拉去一个文件，大大减少了碎片文件传输的问题。但是假如下游stage的分区数量N很大，还是会在每个Executor节点生成N个文件。如果一个Executor上有K个task，会有$K \times N$个file writer，总体上来没有从根本上解决问题。
-
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/spark-shuffle-v2.png}
-    \caption{Hash Shuffle V2原理图}
-    \label{fig:shuffle-v2}
-\end{figure}
-
-
-针对Hash Shuffle存在的问题，Spark引入了Sort Shuffle。在map阶段的shuffle write操作，会按照paitition id以及key对记录进行排序，将所有partition的数据写入同一个文件中，该文件中的数据会按照partition id排序存放，每个partition内部按照key进行排序存放，map task会按照顺序写每个partition的数据，并通过索引文件记录每个partition的大小和偏移量。这样每个map task只需要开启两个file writer，一个写数据，一个写索引，大大减轻了Hash Shuffle存在的大量file writer的问题，如果一个executor有K个task，最多一次性会开启$K \times 2$个文件描述符。在reduce阶段，reduce task拉去数据做combine操作时不再使用HashMap，而是采用ExternalAppendOnlyMap，该数据结构在做combine操作时，如果内存不足会将数据写入磁盘之中，这就保证了系统的鲁棒性。避免了数据量比较大情况下OOM的问题。
-
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=1\textwidth]{Img/sort-shuffle.png}
-    \caption{Sort Shuffle原理图}
-    \label{fig:sort-shuffle}
-\end{figure}
-
-
-\section{join算子解析}
+\subsection{重要算子介绍}
 
 Join算子是Spark最重要的底层算子之一，所以非常有必要单独详细解析join操作的实现原理。Join操作主要有两种使用场景，第一种用于Spark SQL之中，另一种是通过DateFrame编写Spark应用程序。通过语法分析、一系列查询优化之后会得到逻辑执行计划，最后映射为物理执行计划，转化为DAG执行。
 
@@ -328,6 +227,159 @@ left anti join的原理如图\ref{fig:anti-join}所示，以左表为准，在�
     \caption{anti Join实现原理}
     \label{fig:anti-join}
 \end{figure}
+
+\section{Spark内存管理模块分析}
+
+Spark是一种基于内存的分布式计算框架，在计算的过程中通过将数据缓存在内存中加速计算过程。所以内存管理模块是Spark系统的核心模块。Spark内存管理机制在JVM虚拟内存管理的基础上对Executor模块拥有的内存进行了进一步的分配管理。也支持在Executor外的系统内存中直接开辟内存空间用于存储计算过程中产生的大量数据。通过使用对外内存，可以减少内存空间不足导致的垃圾回收以及内存不足错误。
+
+Spark框架执行过程中内存管理模块会申请JVM内存，申请的大小由配置参数决定。内存管理模块会将内存分为四个部分。Storage Memory，Execution Memory，User Memory，Reserved Memory。四部分内存有不同的用途。
+
+\begin{enumerate}
+    \item Storage Memory 用于缓存中间数据。比如对于一份数据data1，在之后计算过程中需要重复使用。就可以调用data1.cache接口将数据缓存在Storage Memory区域。在之后计算过程中框架就可以直接从Storage Memory区域读取数据。具体来说，调用cache接口并不会立刻将数据写入缓存之中，而只是设置了STORAGE\_LEVEL这个标记为MEMORY\_ONLY。后续在框架执行的过程中，当data1被计算得到时，框架会检查STORAGE\_LEVEL这个标记，发现为MEMORY\_LEVEL后会通过memory maneger将其存入Storage Memory之中。这个过程并不会造成内存拷贝复制。memory manager只是将指向数据的引用从Execution Memory移到Storage Memory之中，并更新两个内存区域内存总量。
+    
+    \item Execution Memory 用于框架计算过程。在计算过程中比如对于Shuffle操作，需要在内存中缓存一部分数据，再一次性写入文件系统之中，从而避免频繁磁盘IO导致的延迟。在计算的过程中数据也都存放在Executor Memory之中。比如上面所说的data1，在计算过程中一直使用Execution Memory。在计算结束之后根据STORAGE\_LEVEL，如果为MEMORY\_ONLY就会移到Storage Memory之中。
+    
+    \item User Memory 为应用程序使用的内存空间。应用程序创建的各种和Spark框架无关的对象都会存在User Memory之中。
+    
+    \item Reserved Memory 的目的是避免发生OOM（Out of Memory）错误。OOM问题的根本原因是框架的内存管理和底层JVM的内存管理是完全隔离的。框架只是简单的记录内存的使用量，但是记录的内存使用量和实际的内存使用量并不是一一对应的。首先User Memory的内存是框架无法准确感知的。其次Storage Memory区域的内存也是不准确的，比如Storage Memory区域缓存有一份数据data1。之后应用程序调用data1.uncache接口将data1数据从内存中清除。框架所做的工作是在缓存管理模块中将data1的引用释放，并且将data1的内存总量加到Storage Memory的空闲内存之中，表示这些内存空间空闲。但是此时data1实际占用的JVM内存并没有被释放，实际内存的释放完全依赖于JVM虚拟机的垃圾回收机制，如果此时框架有新的内存申请请求，就有很大可能让框架实际使用内存超过向JVM申请的资源，导致OOM错误。所以需要保留一段空闲内存，避免这种OOM的出现。但是这种方法也有一些缺点，首先它并不能完全消除OOM错误，只要多申请的内存超过Reserved Memory的大小，还是会导致出错。另一方面Reserved Memory所占用的内存资源完全被浪费了，造成内存资源利用率下降。
+\end{enumerate}
+
+目前内存管理模块有两种模式，默认模式和Legacy模式。默认模式Storage Memory和Execution Memory是共享内存空间的。Legacy模式下Storage Memory和Execution Memory是隔离的，通过配置文件可以配置两者的大小。
+
+\subsection{弹性分布式数据集RDD}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{Img/RDD示意图.png}
+    \caption{只读弹性分布式数据集RDD}
+    \label{fig:rdd}
+\end{figure}
+
+弹性分布式数据集（Resilient Distributed Datasets）是Spark框架的核型概念。RDD是指一种可并行可操作的只读数据集合。RDD利用了Scala语言的特性，Scala将数据分为可变数据variable和不可变数据value。RDD中的数据被设置成不可变数据，所以在创建之后就不能再改变了，因为是不可变数据，所以很适合并行处理。RDD数据有丰富的操作，操作也分为两类，transform和action。transform操作是将一个RDD转化为另一个RDD。因为对于用户来说RDD无法直接展示，所以框架也不会立即计算。action操作是计算出一个具体的结果，比如求和，求平均数等操作。因为需要计算具体的结果，所以框架只有遇到action操作才会具体计算。RDD数据之间的操作相当于作业DAG图中的边。RDD相当于DAG图中的点。Spark框架通过DAG图的拓扑来解决容错的问题。比如data1是由data2和data3计算得到的。在DAG图中就有data1指向data2和data3的两条边。在计算data1的过程中框架会沿着这两天边检查data2和data3的状态，如果data2和data3保存在内存之中，框架会直接进行计算，如果保存在磁盘之中，框架会从磁盘中将数据加载到内存之中进行计算。如果数据完全丢失了，框架就会重新计算RDD数据。
+
+\begin{table}
+ \centering
+ \small
+ \caption{transformation算子}
+ \label{tab:transformation}
+ \resizebox{\columnwidth}{!}{%
+ \begin{tabular}{lccccccccl}
+  \toprule
+  算子名称 & 算子操作 \\
+  \midrule
+  $map(f: T \Rightarrow  U)$ & $RDD[T] \Rightarrow RDD[U]$ \\
+  $filter(f : T \Rightarrow Bool)$ & $ RDD[T] \Rightarrow RDD[U] $ \\
+  $flatMap(f : T \Rightarrow Seq[U]) $ & $ RDD[T] \Rightarrow RDD[U] $ \\
+  $sample(fraction : Float)$ & $RDD[T] \Rightarrow RDD[T]$ \\
+  $groupByKey()$ & $RDD[k, v] \Rightarrow RDD[K, Seq[V]]$ \\
+  $reduceByKey(f : (V, V) \Rightarrow V)$ & $RDD[K,V] \Rightarrow RDD[K,V]$ \\
+  $union()$ & $(RDD[T], RDD[T]) \Rightarrow RDD[T]$ \\
+  $join()$ & $(RDD[K,V], RDD[K,W]) \Rightarrow RDD[K, (V, W)]$ \\
+  $cogroup()$ & $(RDD[K,V], RDD[K,W]) \Rightarrow RDD[K, (Seq[V], Seq[W])]$ \\
+  $crossProduct()$ & $(RDD[T], RDD[U]) \Rightarrow RDD[(T,U)]$ \\
+  $mapValues(f : V \Rightarrow W)$ & $RDD[K,V] \Rightarrow RDD[K,W]$ \\
+  $sort(c:Comparator[K])$ & $RDD[K,V] \Rightarrow RDD[K,V]$ \\
+  $partitionBy(p : Partitioner[K])$ & $RDD[K,V] \Rightarrow RDD[K,V]$ \\
+  \bottomrule
+ \end{tabular}}
+\end{table}
+
+\begin{table}
+ \centering
+ \small
+ \caption{action算子}
+ \label{tab:action}
+ \resizebox{\columnwidth}{!}{%
+ \begin{tabular}{lccccccccl}
+  \toprule
+  算子名称 & 算子操作 \\
+  \midrule
+  $count()$ & $RDD[T] \Rightarrow Long$\\
+  $collect()$ & $RDD[T] \Rightarrow Seq[T]$\\
+  $reduce(f : (T,T) \Rightarrow T)$ & $RDD[T] \Rightarrow T$\\
+  $lookup(k, K)$ & $RDD[K,V] \Rightarrow Seq[V]$\\
+  $save(path:String)$ & 将RDD数据存储到存储系统\\
+  \bottomrule
+ \end{tabular}}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-transformations-actions.png}
+    \caption{transformation和action算子}
+    \label{fig:rdd-transformation-action}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-dependency.png}
+    \caption{宽依赖与窄依赖}
+    \label{fig:rdd-dependency}
+\end{figure}
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-dag.png}
+    \caption{stage划分示意图}
+    \label{fig:rdd-dag-stage}
+\end{figure}
+
+RDD之间的关系还可以进一步分类。如果转化操作的逻辑可以转化为窄依赖和宽依赖两种。窄依赖是指父RDD的每个分区只被一个子RDD的分区使用，这种依赖关系下，父子RDD之间数据交换无需进行shuffle操作，父RDD只需将数据发送给子RDD即可。宽依赖是指父RDD的分区数据会被多个子RDD的分区使用，也就是说父RDD输出的数据会被多个子RDD使用，这就需要在父子之间进行Shuffle交换数据，宽窄依赖主要用于作业调度执行。框架在执行过程中遇到一个action操作就会提交一个job，在job调度执行期间，DAGScheduler会把所有宽依赖所在的边切分，将整个DAG计算图切分成多个子图，每个子图称为一个stage，DAGScheduler将stage发送给TaskScheduler调度执行每一个任务。
+
+\subsection{缓存数据管理模块}
+
+缓存存储模块主要包含如下两个部分，RDD缓存和Shuffle数据缓存。缓存模块的主要工作是管理RDD缓存，包括内存和磁盘的缓存。Shuffle中间数据的管理也是有缓存管理模块完成。存储模块中管理着多种不同的数据，包括RDD数据块、Shuffle数据块、广播变量数据块、任务返回数据块、流式数据块。RDD数据块用于标记缓存的RDD数据。Shuffle数据块用于标识缓存的Shuffle数据。广播变量数据块用于标识广播变量。任务返回数据块用于标识任务赶回结果数据。流式数据块在Spark Streaming中用于标记收到的流式数据。
+
+BlockManager模块用于管理各种缓存数据。RDD分区数据，Shuffle数据，broadcast数据都由BlockManager管理。BlockManager是一个主从结构。在Driver节点和Executor节点都有BlockManager，Executor节点的BlockManager会将block数据块的数据都发送给Driver节点的BlockManager统一管理。BlockManager对外提供get和set接口，可以将数据存储在内存、磁盘或者堆外内存。
+
+Driver初始化的时候会创建BlockManager的时候会创建一个BlockManagerMasterEndpoint，之后Driver会将BlockManagerMasterEndpoint发送给Executor节点，Executor节点收到后会创建自己的BlockManager，并且通过BlockManagerMasterEndpoint向Driver节点上报注册信息。
+
+
+BlockManager模块有MemoryStore和DiskStore两个模块用以存储block。DiskStore使用磁盘存储缓存数据，DiskStore中有一个成员DiskStoreManager，它的主要作用是管理逻辑block和物理block之间的映射关系，DiskStore中的block对应文件系统中的一个文件。DiskStore接收到缓存请求的时候会根据规则创建一个文件并将文件写入文件之中。MemoryStore使用Executor的JVM堆内存存储数据。MemoryStore中维护了一个LinkedHashMap来管理所有的block，Scala语言的LinkedHashMap底层通过链表存储数据，会将访问的数据移到链表头部。所以LinkedHashMap是具有LRU的特性的。MemoryStore模块就是巧妙地利用LinkedHashMap实现LRU替换策略的。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{Img/rdd-cache.png}
+    \caption{数据缓存示意图}
+    \label{fig:rdd-cache}
+\end{figure}
+
+\subsection{Shuffle原理解析}
+
+在传统Hadoop系统之中Shuffle是连接Map操作和Reduce操作的桥梁，在Spark之中Shuffle操作使用场景更多。Shuffle操作将map的输出对应到reduce的输入中，Shuffle操作涉及到序列化和反序列化、跨节点网络通信IO以及磁盘读写IO等。所以说Shuffle操作是整个应用程序运行过程中非常重要的一个阶段。
+
+Spark的Shuffle实现大致如图\ref{fig:shuffle-overview}所示，对于一个DAG计算图，以Shuffle操作为界，划分stage，上游stage为map阶段，下游stage为reduce阶段。map阶段的每一个任务计算得到一个分区，将分区数据分成多份，每一份发送给下游stage对应的分区，并且将临时结果写入磁盘，这个过程叫做shuffle write；下游stage为reduce task，每个reduce task通过网络拉去上游stage中所有map task的指定分区结果数据，该过程叫做shuffle read，最后完成整个计算过程。这里举一个例子说明，例如上游stage有M个map task，下游stage有N个reduce task，那么上游stage的每个map task都会将输出数据分为N份。下游stage的每个reduce task会从上游拉去M个数据。整个Shuffle过程会产生$M \times N$个临时小文件，每个小文件都要写入磁盘，导致大量碎片写磁盘操作，每个小文件也会通过网络传输给下游节点，造成大量网络传输。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-shuffle-overview.png}
+    \caption{Hash Shuffle V1原理图}
+    \label{fig:shuffle-overview}
+\end{figure}
+
+为了解决这些问题，Spark进行了一系列的优化，如图\ref{fig:shuffle-v2}为了减少临时小文件的数量，Spark使用将map task输出的小文件合并到同一个文件，这样下游的reduce task只需要一次性从上游拉去一个文件，大大减少了碎片文件传输的问题。但是假如下游stage的分区数量N很大，还是会在每个Executor节点生成N个文件。如果一个Executor上有K个task，会有$K \times N$个file writer，总体上来没有从根本上解决问题。
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{Img/spark-shuffle-v2.png}
+    \caption{Hash Shuffle V2原理图}
+    \label{fig:shuffle-v2}
+\end{figure}
+
+
+针对Hash Shuffle存在的问题，Spark引入了Sort Shuffle。在map阶段的shuffle write操作，会按照paitition id以及key对记录进行排序，将所有partition的数据写入同一个文件中，该文件中的数据会按照partition id排序存放，每个partition内部按照key进行排序存放，map task会按照顺序写每个partition的数据，并通过索引文件记录每个partition的大小和偏移量。这样每个map task只需要开启两个file writer，一个写数据，一个写索引，大大减轻了Hash Shuffle存在的大量file writer的问题，如果一个executor有K个task，最多一次性会开启$K \times 2$个文件描述符。在reduce阶段，reduce task拉去数据做combine操作时不再使用HashMap，而是采用ExternalAppendOnlyMap，该数据结构在做combine操作时，如果内存不足会将数据写入磁盘之中，这就保证了系统的鲁棒性。避免了数据量比较大情况下OOM的问题。
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{Img/sort-shuffle.png}
+    \caption{Sort Shuffle原理图}
+    \label{fig:sort-shuffle}
+\end{figure}
+
+
 
 \section{应用举例}
 

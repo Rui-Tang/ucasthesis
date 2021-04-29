@@ -1,4 +1,7 @@
 \chapter{基于作业运行时信息及拓扑结构的缓存替换策略}\label{chap:guide}
+
+本章首先分析了Spark框架的缓存替换机制存在的问题，之后详细阐述了基于作业运行时信息和拓扑结构的缓存替换策略的设计与实现过程。最后对该缓存替换机制进行了测试。
+
 \section{Spark系统缓存替换策略分析}
 
 在第二章已经详细分析过Spark默认的LRU缓存替换策略。是通过BlockManager管理RDD缓存数据、Shuffle数据、BroadCast缓存数据。本章重点关注RDD缓存数据。BlockManager内部有MemoryStore和DiskStore。分别用来管理内存缓存数据以及磁盘缓存数据。MemoryStore内部是通过LinkedHashMap存储block数据，LinkedHashMap是具有LRU特性的。
