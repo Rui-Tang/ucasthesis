@@ -6,7 +6,7 @@
 
 在第二章已经详细分析过Spark默认的LRU缓存替换策略。是通过BlockManager管理RDD缓存数据、Shuffle数据、BroadCast缓存数据。本章重点关注RDD缓存数据。BlockManager内部有MemoryStore和DiskStore。分别用来管理内存缓存数据以及磁盘缓存数据。MemoryStore内部是通过LinkedHashMap存储block数据，LinkedHashMap是具有LRU特性的。
 
-Spark框架使用简单的LRU缓存替换策略是有潜在的问题的。因为LRU策略仅仅考虑了数据访问的时间特性，在缓存空间不足的时候优先替换最长时间为访问的数据。这种方法它的优点是实现方法简单，时间复杂度低，在CPU Cache缓存场景是很合适的，因为Cache中数据大小一样，内存访问请求对与CPU来说也具有相同的重要性，因为从CPU的视角来看，不同的物理地址并没有什么不同。另一个方面，LRU缓存策略比较简单，在CPU物理器件内部比较容易实现。所以在CPU缓存场景下，LRU这种缓存替换策略是很适用的。但是对于Spark框架来说，LRU策略就有一些不足。因为不同的RDD具有不同的重要性，数据大小也不同。有的RDD数据是通过复杂计算，耗费了很长时间计算得到的。并且对于整个DAG计算图来说，不同的RDD的重要性也各不相同。如果对DAG中的关键路径的RDD节点，如果发生了数据丢失就会影响到整个DAG计算图作业的端到端执行时间。所以对LRU缓存替换策略进行进一步的改进，对于提升任务执行效率，减少任务端到端执行时间具有重要的意义。
+Spark框架使用简单的LRU缓存替换策略是有潜在的替换重要数据的问题。因为LRU策略仅仅考虑了数据访问的时间特性，在缓存空间不足的时候优先替换最长时间为访问的数据。这种方法它的优点是实现方法简单，时间复杂度低，在CPU Cache缓存场景是很合适的，因为Cache中数据大小一样，内存访问请求对与CPU来说也具有相同的重要性，因为从CPU的视角来看，不同的物理地址并没有什么不同。另一个方面，LRU缓存策略考虑因素比较单一，只考虑了数据访问时间这一因素，在CPU物理器件内部比较容易实现。所以在CPU缓存场景下，LRU这种缓存替换策略是很适用的。但是对于Spark框架来说，LRU策略就有一些不足。因为不同的RDD具有不同的重要性，数据大小也不同。有的RDD数据是通过复杂计算，耗费了很长时间计算得到的。并且对于整个DAG计算图来说，不同的RDD的重要性也各不相同。如果对DAG中的关键路径的RDD节点，如果发生了数据丢失就会影响到整个DAG计算图作业的端到端执行时间。所以对LRU缓存替换策略进行进一步的改进，对于提升任务执行效率，减少任务端到端执行时间具有重要的意义。
 
 \section{基于作业运行时信息及拓扑结构的缓存替换策略的设计与实现}
 
@@ -100,30 +100,30 @@ Spark应用程序会组成一个DAG计算图。DAG图中的节点为RDD数据，
 
 \section{测试与分析}
 
-本章通过四组样例测试了上述缓存替换策略的效果，每组测试分为四个case，从2GB数据到16GB数据。测试结果如图\ref{fig:cache-time}所示。测试了不同缓存策略作业执行时间。通过实验结果可以发现，在小数据场景下LRU策略会快一点，这应该是因为LRU实现简单，并且小规模数据内存空间充足，导致缓存替换策略起不到作用。在大规模数据集上，本章所述的缓存替换策略会体现出微弱的优势。但是对于迭代时计算没有效果，这是因为LRU策略是非常适合迭代式计算的。
+本章测试环境和\ref{tab:setup}相同，通过四组样例测试了上述缓存替换策略的效果，每组测试分为四个case，从2GB数据到16GB数据。测试结果如图\ref{fig:cache-time}所示。测试了不同缓存策略作业执行时间。通过实验结果可以发现，在小数据场景下LRU策略会快一点，这应该是因为LRU实现简单，并且小规模数据内存空间充足，导致缓存替换策略起不到作用。在大规模数据集上，缓存替换策略对于SQL类作业会体现出一定的效果，作业平均执行时间减少了23s。但是对于迭代式计算没有太大的效果，这是因为LRU策略是非常适合迭代式计算的。
 
 \begin{figure}[!htbp]
     \centering
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/lr-cache.jpg}
+      \includegraphics[width=\textwidth]{Img/lr4.jpg}
       \caption{逻辑回归测试}
       \label{fig:lr-cache}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/hive-cache.jpg}
+      \includegraphics[width=\textwidth]{Img/hive4.jpg}
       \caption{HIVE SQL测试}
       \label{fig:hive-cache}
     \end{subfigure}
     \\% line break
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/pagerank-cache.jpg}
+      \includegraphics[width=\textwidth]{Img/pg4.jpg}
       \caption{PageRank测试}
       \label{fig:pagerank-cache}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/matrix-cache.jpg}
+      \includegraphics[width=\textwidth]{Img/mx4.jpg}
       \caption{矩阵分解测试}
       \label{fig:matrix-cache}
     \end{subfigure}

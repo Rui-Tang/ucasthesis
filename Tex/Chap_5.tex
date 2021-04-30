@@ -6,7 +6,7 @@
 
 Spark框架由Scala语言编写。Scala语言是一种运行在JVM（Java Virtual Machine）的函数式编程语言。函数式编程语言相比于C++、Java等命令式编程语言的优点是将数据进行了分类，分为可变数据数据variable和不可变数据value。同时也提供了非常适合并行编程的函数式编程接口。函数式语言的这种特点就让它天然适用于分布式并行大数据处理领域。Scala语言还有一个独特的优势就是它是运行在JVM之上的，这就让Scala语言可以运行在所有支持JVM的平台上，这就使得Scala具有非常好的跨平台特性。但是对于Spark框架来说，他有完全独立的内存管理模块BlockManager。BlockManager也是运行在JVM上的一个进程。
 
-\begin{figure}[htbp]
+\begin{figure}
     \centering
     \includegraphics[width=0.99\textwidth]{Img/block-manager.jpg}
     \caption{BlockManager结构图}
@@ -17,9 +17,9 @@ Spark框架由Scala语言编写。Scala语言是一种运行在JVM（Java Virtua
 
 BlockManager和JVM都有管理内存的功能，但是两者完全隔离，这就会有潜在的问题。BlockManager内存管理的原理非常简单。用户提交Spark应用的时候会通过配置文件指定Executor使用的内存总量，之后框架会向JVM申请内存创建Executor以及内部的BlockManager。BlockManager初始化之后会开始管理Executor整个内存空间。BlockManager向外提供了非常简单的接口，Get接口和Put接口。Get接口的参数为RDD数据的ID，如果数据存储在磁盘或者内存之中BlockManager就会返回具体的地址。Put接口的参数是RDD的应用和存储级别，比如MEMORY\_ONLY、DISK\_ONLY等，BlcokManager会根据存储级别将数据存储在不同位置。
 
-框架的内存模型如图\ref{fig:memory-model}所示。Spark框架内存模型分为以下几个部分：Storage区域，Execution区域，Other区域。Other区域主要用于用户程序定义的数据结构。Execution内存用于框架执行，比如计算RDD的分区时数据就全部存储在Execution区域。Execution区域的内存有一个特点就是会主动地回收内存。他使用的方法是类似与引用计数的算法。比如一个图\ref{fig:simpl-dag}所示的简单的三个节点的计算图。计算得到数据B的时候B的数据就存储在Execution区域。因为计算C还会使用数据B所以数据B并不会立刻被替换出去。但是A会被立刻删除。在以后计算E的时候又会使用到数据A，但是数据A早已被删除，这就会造成数据丢弃，框架会通过容错算法重新计算数据A。
+框架的内存模型如图\ref{fig:memory-model}所示。Spark框架内存模型分为以下几个部分：Storage区域，Execution区域，Other区域。Other区域主要用于用户程序定义的数据结构。Execution内存用于框架执行，比如计算RDD的分区时数据就全部存储在Execution区域。Execution区域的内存有一个特点就是会主动地回收内存。
 
-\begin{figure}[htbp]
+\begin{figure}
     \centering
     \includegraphics[width=0.99\textwidth]{Img/memory-model.png}
     \caption{内存模型}
@@ -30,7 +30,7 @@ BlockManager和JVM都有管理内存的功能，但是两者完全隔离，这�
 
 通过详细分析Spark框架缓存管理模块的原理可以发现存在着潜在的问题。因为Spark框架的内存管理和JVM虚拟机的内存管理是完全独立的。Spark框架申请内存的行为是一次性的，但是Spark框架释放内存行为和JVM是不同步的。Spark内存管理依赖于JVM的内存回收机制。JVM的自动给回收机制是通过可达性分析实现的。通过从垃圾回收根节点对象出发向下搜索，搜索到的节点为引用链，如果有一些对象没有任何引用链相连，那么这个对象对于内存回收根对象是不可达的，所以将其判定为可回收对象。JVM实际的内存回收原理要复杂得多。根据对内存分析过程的分析可以看到JVM内存回收过程需要进行大量的计算判断，并不能实时地回收内存对象。然而Spark框架的unpersist调用会释放MemoryStore中的RDD对象引用，所以从Spark框架视角看来内存回收立刻就完成了，这就会造成了潜在的风险。对于以下这种场景就有可能超过内存使用上限，造成JVM内存使用超限错误（OOM，Out of Memory error）。具体场景是这样的，Spark应用在执行过程中通过cache调用在内存中缓存了很多RDD数据。缓存空间所剩无几，此时有新的缓存需求，Spark框架就会通过缓存替换策略替换一定数量的数据腾出缓存空间。然而此时JVM内存并没有立刻被回收，但是MemoryStore模块已经认为有了足够的空闲缓存空间，就将新的数据写入缓存空间之中，这就造成了Spark框架使用的内存总量超过了实际向JVM虚拟机申请的总内存，JVM就会杀死Spark框架相关的进程，这就会导致Spark框架奔溃。如图\ref{fig:oom}所示，在第二次内存时因为实际内存并没有释放，就会导致OOM问题。
 
-\begin{figure}[htbp]
+\begin{figure}
     \centering
     \includegraphics[width=0.99\textwidth]{Img/OOM解释.jpg}
     \caption{OOM问题分析}
@@ -56,7 +56,7 @@ BlockManager和JVM都有管理内存的功能，但是两者完全隔离，这�
 
 这里举一个例子，如图\ref{fig:ft1}所示，黄色节点是正在计算的RDD数据，所有黄色节点的距离为0，黄色RDD节点需要使用距离为1的虚线框中的数据计算得到，所以1号虚框中的数据要保存在内存之中加速计算。在正常计算过程中是只需要使用1号虚框中的数据的，所以灰色节点都可以从缓存中清除出去，从而可以提高缓存空间利用率。然而这种方式的容错性却非常差，在出错场景下会造成严重的重复计算开销。例如图\ref{fig:ft1}所示，红色节点是出错节点，因为在分布式计算数据存在多个机器上，如果某个机器发生问题就会导致这个机器上的数据全部丢失，假设红色节点的数据全部丢失，根据Spark框架的容错原理就需要根据DAG拓扑关系重复计算，具体来说就会计算图\ref{fig:ft1}中红色框中的所有数据，这就会造成大量的重复计算开销。
 
-\begin{figure}[htbp]
+\begin{figure}
     \centering
     \includegraphics[width=0.6\textwidth]{Img/ft1.png}
     \caption{出错场景重复计算问题}
@@ -65,7 +65,7 @@ BlockManager和JVM都有管理内存的功能，但是两者完全隔离，这�
 
 本文的容错性加强策略就可以兼顾缓存空间使用效率和容错性。如图\ref{fig:ft2}所示，同样黄色节点是正在计算的节点，同样需要使用1号虚框中的数据计算黄色节点。2号虚框中的数据是距离黄色虚框中所有节点距离为2个节点。通过将2号虚框中的蓝色节点也都保留在内存之中，就可以在出错场景下快速恢复计算。同样红色节点是出错节点，在出错场景下同样会根据容错机制根据DAG图重复计算，但是因为2号虚框中的数据都缓存在内存之中，框架只需要重复计算图\ref{fig:ft2}中红色框中的数据就可以快速恢复计算。可见相比于\ref{fig:ft1}，本文的设计能够极大的减少出错场景下重复计算量，从而极大增加了系统的容错性。同时也兼顾了内存资源的使用效率。算法\ref{alg:cal-dis}会返回一个需要清理的rdd列表，之后调用unpersist接口清理所有的缓存数据即可。
 
-\begin{figure}[htbp]
+\begin{figure}
     \centering
     \includegraphics[width=0.6\textwidth]{Img/ft2.png}
     \caption{出错场景快速恢复}
@@ -73,7 +73,7 @@ BlockManager和JVM都有管理内存的功能，但是两者完全隔离，这�
 \end{figure}
 
 
-\begin{figure}[htbp]
+\begin{figure}
     \centering
     \includegraphics[width=1\textwidth]{Img/缓存清理模块流程图.png}
     \caption{缓存清理模块流程图}
@@ -111,30 +111,30 @@ BlockManager和JVM都有管理内存的功能，但是两者完全隔离，这�
 
 \section{测试与分析}
 
-本章选取了逻辑回归、HIVE SQL、PageRank和矩阵分解8GB输入数据进行测试。选取8GB数据是因为测试环境Executor设置为8GB。2G和4G测试数据太少，用不完缓存空间。但是对于16GB测试数据会从一开始就用满Executor所有内存。所以使用8GB测试数据比较合适。根据图\ref{memory-use}测试结果可以发现，HIVE SQL冗余缓存清理效果最佳，这是应为HIVE SQL计算图是DAG形式，前面的数据计算结束之后就可以替换删除。而对于另外三种迭代式计算，因为迭代轮数很多，每次迭代都会将数据缓存到内存之中，又因为内存释放又延迟，所以虽然缓存清理有一定效果，但是逐渐的内存也会被占满。
+本章测试环境和\ref{tab:setup}相同，选取了逻辑回归、HIVE SQL、PageRank和矩阵分解8GB输入数据进行测试。选取8GB数据是因为测试环境Executor设置为8GB。2G和4G测试数据太少，用不完缓存空间。但是对于16GB测试数据会从一开始就用满Executor所有内存。所以使用8GB测试数据比较合适。根据图\ref{fig:memory-use}测试结果可以发现，HIVE SQL冗余缓存清理效果最佳，这是应为HIVE SQL计算图是DAG形式，前面的数据计算结束之后就可以替换删除。而对于另外三种迭代式计算，因为迭代轮数很多，每次迭代都会将数据缓存到内存之中，又因为内存释放又延迟，所以虽然缓存清理有一定效果，但是逐渐的内存也会被占满。
 
-\begin{figure}[!htbp]
+\begin{figure}
     \centering
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/lr-use.jpg}
+      \includegraphics[width=\textwidth]{Img/lr3.jpg}
       \caption{逻辑回归内存使用情况}
       \label{fig:lr-use}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/hive-use.jpg}
+      \includegraphics[width=\textwidth]{Img/hive3.jpg}
       \caption{HIVE SQL内存使用情况}
       \label{fig:hive-use}
     \end{subfigure}
     \\% line break
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/pagerank-use.jpg}
+      \includegraphics[width=\textwidth]{Img/pg3.jpg}
       \caption{PageRank内存使用情况}
       \label{fig:pagerank-use}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/matrix-use.jpg}
+      \includegraphics[width=\textwidth]{Img/mx3.jpg}
       \caption{矩阵分解内存使用情况}
       \label{fig:matrix-use}
     \end{subfigure}
@@ -144,4 +144,4 @@ BlockManager和JVM都有管理内存的功能，但是两者完全隔离，这�
 
 \section{本章总结}
 
-本章首先介绍了Spark内存管理模块底层原理以及JVM垃圾回收的简单原理，然后分析了潜在的问题。为了解决潜在的OOM问题并且保证一定的兼容性，本文提出了一种容错性加强的缓存清理方法。最后进行了一些列测试。测试发现对于迭代计算作业，在作业开始时缓存清理模块能够减少内存使用量，但是逐渐的还是会占满所有缓存空间。缓存清理模块对于SQL查询作业效果比较好，因为SQL作业为DAG图结构，阶段性特性比较好，所以能够解决大量的内存空间。
+本章首先介绍了Spark内存管理模块底层原理以及JVM垃圾回收的简单原理，然后分析了潜在的问题。为了解决潜在的OOM问题并且保证一定的兼容性，本文提出了一种容错性加强的缓存清理方法。最后进行了一些列测试。测试发现对于迭代计算作业，在作业开始时缓存清理模块能够减少内存使用量，但是逐渐的还是会占满所有缓存空间。缓存清理模块对于SQL查询作业效果比较好，因为SQL作业为DAG图结构，阶段性特性比较好，所以能够解决大量的内存空间。最后经过计算，作业执行过程中的缓存占用率平均降低了19.5\%

@@ -22,7 +22,7 @@ Spark应用在执行过程中会将应用程序解析成DAG图，然后根据DAG
 
 \end{enumerate}
 
-\begin{figure}[htbp]
+\begin{figure}
     \centering
     \includegraphics[width=0.99\textwidth]{Img/wrong-sort-join.png}
     \caption{不合理的物理执行计划}
@@ -76,7 +76,7 @@ SparkContext对象创建之后会初始化各个组件，初始化完成之后�
 
 为了得到整个DAG图的结构，需要使用小量数据运行整个应用程序，得到DAG图结构。这就需要修改输入RDD节点，之前说过RDD节点是只读的，这种特性是利用了Scale语言的特性，将data字段设置为不可变的value对象。所以需要将data改为可变数据variable。这样就可以替换输入数据为小规模数据。同时还需要将全局RDD的STORAGE\_LEVEL字段设置为MEMORY\_ONLY，这是为了得到一个正确的DAG图结构。在计算结束之后，就可以得到完整的DAG图。Spark应用在结束的时候会调用sparkContext.stop接口结束整个应用并释放所有资源，所以可以修改stop接口，将数据替换为全量数据，重新运行整个作业之后结束整个作业。完整的流程如图\ref{fig:auto-cache}所示。
 
-\begin{figure}[htbp]
+\begin{figure}
     \centering
     \includegraphics[width=1\textwidth]{Img/自动缓存流程图.png}
     \caption{自动缓存流程图}
@@ -157,7 +157,7 @@ SparkBench是Spark系统的基准性能测试项目，由IBM Watson研究中心�
  \centering
  \caption{SparkBenck支持的负载}
  \label{tab:workload}
- \begin{tabular}{lcl}
+ \begin{tabular}{lcccl}
   \toprule
   应用类型 & 测试负载 \\
   \midrule
@@ -182,7 +182,7 @@ SparkBench测试数据大部分都可以通过自带的数据生成器生成。S
 
 \section{测试与分析}
 
-本实验在一台PC电脑上实现，通过参数设置Spark为local mode，同时设置Spark为local模式运行。给Spark框架分配了8GB的内存。6个CPU。具体硬件配置与原件版本如表所示。
+本实验在一台PC电脑上实现，通过参数设置Spark为local mode，同时设置Spark为local模式运行。给Spark框架分配了8GB的内存。6个CPU。具体硬件配置与原件版本如表\ref{tab:setup}所示。
 
 \begin{table}
  \centering
@@ -235,30 +235,29 @@ SparkBench测试数据大部分都可以通过自带的数据生成器生成。S
  \end{tabular}
 \end{table}
 
-之后我测试了自动缓存模块的效果，测试方法是修改了SparkBench测试负载的代码(在legacy分支)，将代码中的cache调用全都删除，修改后运行添加了自动缓存模块的Spark框架。之后再与未修改的原生Spark框架进行对比。测试结果如图\ref{fig:auto-cache}所示。对于四个测试样例，一共进行了4组测试。每组测试分为两个样例，分别是手动缓存测试程序和自动缓存模块的对比。可见，自动缓存因为需要执行一遍得到整个DAG图结构，所以不可避免会导致一些额外的开销。使用自动缓存的模块实际运行时间变化不大。总体来说，因为使用自动缓存模块会带来大概13\%左右的额外开销。不同作业的额外开销情况也有所不同。
-
-\begin{figure}[!htbp]
+之后本文测试了自动缓存模块的效果，测试方法是修改了SparkBench测试负载的代码(在legacy分支)，将代码中的cache调用全都删除，修改后运行添加了自动缓存模块的Spark框架。之后再与未修改的原生Spark框架进行对比。测试结果如图\ref{fig:auto-cache}所示。对于四个测试样例，一共进行了4组测试。每组测试分为两个样例，分别是手动缓存测试程序和自动缓存模块的对比。可见，自动缓存因为需要执行一遍得到整个DAG图结构，所以不可避免会导致一些额外的开销。使用自动缓存的模块实际运行时间变化不大。总体来说，因为使用自动缓存模块对于迭代式运算作业会带来12\%的额外开销，对于SQL类作业会带来3\%的额外开销。
+\begin{figure}
     \centering
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/LR-cache.png}
+      \includegraphics[width=\textwidth]{Img/lr1.jpg}
       \caption{逻辑回归测试}
       \label{fig:lr-auto-cache}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/HIVE-cache.png}
+      \includegraphics[width=\textwidth]{Img/hive1.jpg}
       \caption{HIVE SQL测试}
       \label{fig:hive-auto-cache}
     \end{subfigure}
     \\% line break
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/PAGERANK-cache.png}
+      \includegraphics[width=\textwidth]{Img/pg1.jpg}
       \caption{PageRank测试}
       \label{fig:pagerank-auto-cache}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/MATRIX-cache.png}
+      \includegraphics[width=\textwidth]{Img/mx1.jpg}
       \caption{矩阵分解测试}
       \label{fig:matrix-auto-cache}
     \end{subfigure}
@@ -268,28 +267,28 @@ SparkBench测试数据大部分都可以通过自带的数据生成器生成。S
 
 从图\ref{fig:autocache-2}可以看到，对于逻辑回归、PageRank和矩阵分解来说，额外开销会随着数据规模变大而变大，这与自动缓存和算法实现原理有关。因为这三种算法随着数据规模变大，迭代次数也会变多，所以第一次执行也需要迭代很多次才能得到DAG图结构，就会造成比较大的延迟。而对于HIVE SQL作业来说，随着数据规模变大额外开销并不会随之变化太多。这是因为对于SQL查询作业来说，在SQL转化得到的逻辑执行计划并不会随着输入数据变化，所以不同数据规模的自动缓存模块执行的逻辑执行计划都是一样的，就不会有太大的差别。
 
-\begin{figure}[!htbp]
+\begin{figure}
     \centering
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/lr-cache.jpg}
+      \includegraphics[width=\textwidth]{Img/lr2.jpg}
       \caption{逻辑回归测试}
       \label{fig:lr-ac-2}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/hive-ac-2.jpg}
+      \includegraphics[width=\textwidth]{Img/hive2.jpg}
       \caption{HIVE SQL测试}
       \label{fig:hive-ac-2}
     \end{subfigure}
     \\% line break
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/pagerank-ac-2.jpg}
+      \includegraphics[width=\textwidth]{Img/pg2.jpg}
       \caption{PageRank测试}
       \label{fig:pagerank-ac-2}
     \end{subfigure}%
     ~% add desired spacing
     \begin{subfigure}[b]{0.45\linewidth}
-      \includegraphics[width=\textwidth]{Img/matrix-ac-2.jpg}
+      \includegraphics[width=\textwidth]{Img/mx2.jpg}
       \caption{矩阵分解测试}
       \label{fig:matrix-ac-2}
     \end{subfigure}
@@ -301,5 +300,5 @@ SparkBench测试数据大部分都可以通过自带的数据生成器生成。S
 
 \section{本章总结}
 
-本章介绍了Spark模块底层的原理以及最新的Spark自适应执行特性。之后设计并实现了自动缓存模块，自动缓存模块通过分析DAG图结构得到需要缓存的数据并自动将其缓存到内存之中。最后对自动缓存模块进行了一系列的测试，实验测试结果表明自动缓存模块适合SQL查询类作业，因为这类作业不同数据规模的执行计划相同，所以数据规模越大自动缓存模块额外开销占应用运行总时间越短。但是不太适合迭代计算式作业，因为大规模数据迭代次数变多额外开销也会随之变大。
+本章介绍了Spark模块底层的原理以及最新的Spark自适应执行特性。之后设计并实现了自动缓存模块，自动缓存模块通过分析DAG图结构得到需要缓存的数据并自动将其缓存到内存之中。最后对自动缓存模块进行了一系列的测试，实验测试结果表明自动缓存模块适合SQL查询类作业，因为这类作业不同数据规模的执行计划相同，所以数据规模越大自动缓存模块额外开销占应用运行总时间越短。但是不太适合迭代计算式作业，因为大规模数据迭代次数变多额外开销也会随之变大。最后经过计算，对于迭代式计算和SQL作业，自动缓存模块平均额外计算开销占作业总执行时间的12\%和3\%。
 
